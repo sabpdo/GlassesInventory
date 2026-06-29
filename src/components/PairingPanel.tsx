@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Props = {
   enabled: boolean;
@@ -19,18 +19,53 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
   const [creating, setCreating] = useState(false);
   const [pairUrl, setPairUrl] = useState<string | null>(null);
   const cursorRef = useRef<string | null>(null);
+  const sessionCodeRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    sessionCodeRef.current = session?.code ?? null;
+  }, [session]);
+
+  const closeSession = useCallback(async (code: string) => {
+    try {
+      await fetch(`/api/pair/${encodeURIComponent(code)}`, {
+        method: "DELETE",
+        keepalive: true,
+      });
+    } catch {
+      // Best-effort — phone poll will eventually see expiry anyway.
+    }
+  }, []);
+
+  const clearLocal = useCallback(() => {
+    setSession(null);
+    setQrDataUrl(null);
+    setPairUrl(null);
+    cursorRef.current = null;
+    sessionCodeRef.current = null;
+  }, []);
+
+  const endPairing = useCallback(async () => {
+    const code = sessionCodeRef.current;
+    if (code) await closeSession(code);
+    clearLocal();
+    setError(null);
+  }, [clearLocal, closeSession]);
 
   async function createSession() {
     setCreating(true);
     setError(null);
-    setSession(null);
-    setQrDataUrl(null);
+
+    const existing = sessionCodeRef.current;
+    if (existing) await closeSession(existing);
+
+    clearLocal();
     cursorRef.current = new Date().toISOString();
     try {
       const res = await fetch("/api/pair", { method: "POST" });
       if (!res.ok) throw new Error("Could not create pair code");
       const data: Session = await res.json();
       setSession(data);
+      sessionCodeRef.current = data.code;
 
       const url = `${window.location.origin}/p/${data.code}`;
       setPairUrl(url);
@@ -54,8 +89,30 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
     if (enabled && !session && !creating) {
       createSession();
     }
-    // Tear down isn't required — sessions expire server-side.
   }, [enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When the user leaves "Pair phone" mode, end the session on the server
+  // so the phone page stops too.
+  useEffect(() => {
+    if (enabled) return;
+    const code = sessionCodeRef.current;
+    if (!code) return;
+    closeSession(code);
+    clearLocal();
+  }, [enabled, clearLocal, closeSession]);
+
+  // Close the session when this panel unmounts (navigate away, etc.).
+  useEffect(() => {
+    return () => {
+      const code = sessionCodeRef.current;
+      if (code) {
+        fetch(`/api/pair/${encodeURIComponent(code)}`, {
+          method: "DELETE",
+          keepalive: true,
+        }).catch(() => {});
+      }
+    };
+  }, []);
 
   // Poll for scans from the phone.
   useEffect(() => {
@@ -73,7 +130,7 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
         );
         if (res.status === 410 || res.status === 404) {
           setError("Pair code expired. Generate a new one.");
-          setSession(null);
+          clearLocal();
           return;
         }
         if (res.ok) {
@@ -95,7 +152,7 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, [enabled, session, onBarcode]);
+  }, [enabled, session, onBarcode, clearLocal]);
 
   if (!enabled) return null;
 
@@ -157,11 +214,11 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
                 </li>
                 <li>
                   <span className="font-medium text-slate-900">3.</span> Each
-                  scan pops up below — finish the "Is this sold?" flow on this
-                  computer.
+                  scan pops up below — finish the &quot;Is this sold?&quot; flow
+                  on this computer.
                 </li>
               </ol>
-              <div className="mt-4 flex items-center gap-2">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={createSession}
@@ -178,10 +235,19 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
                     Copy link
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={endPairing}
+                  className="btn-secondary text-red-700 ring-red-200 hover:bg-red-50"
+                >
+                  End pairing
+                </button>
               </div>
               <div className="mt-3 text-xs text-slate-400">
                 Expires{" "}
                 {new Date(session.expiresAt).toLocaleTimeString()}
+                {" · "}
+                End pairing closes the phone scanner too.
               </div>
             </div>
           </div>

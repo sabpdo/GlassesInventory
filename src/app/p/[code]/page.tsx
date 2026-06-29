@@ -5,47 +5,90 @@ import { BarcodeScanner } from "@/components/BarcodeScanner";
 
 type PageProps = { params: { code: string } };
 
+type SessionState =
+  | { status: "loading" }
+  | { status: "invalid"; message: string }
+  | { status: "active"; expiresAt: string }
+  | { status: "ended"; message: string };
+
 export default function PhonePairPage({ params }: PageProps) {
   const code = params.code.toUpperCase();
 
-  const [valid, setValid] = useState<boolean | null>(null);
-  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [session, setSession] = useState<SessionState>({ status: "loading" });
   const [scannerOn, setScannerOn] = useState(true);
   const [sending, setSending] = useState(false);
   const [lastSent, setLastSent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Validate the code once on mount (without leaking auth UI).
+  const applyStatus = useCallback((res: Response, data: { error?: string }) => {
+    if (res.status === 404) {
+      setSession({
+        status: "ended",
+        message:
+          data.error ?? "Pairing ended — the session was closed on the computer.",
+      });
+      setScannerOn(false);
+      return;
+    }
+    if (res.status === 410) {
+      setSession({
+        status: "ended",
+        message: data.error ?? "Pair code expired.",
+      });
+      setScannerOn(false);
+      return;
+    }
+    if (!res.ok) {
+      setSession({
+        status: "invalid",
+        message: data.error ?? "Pair code is not valid.",
+      });
+      return;
+    }
+  }, []);
+
+  // Validate once, then keep polling so we notice when the desktop ends pairing.
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/pair/${encodeURIComponent(code)}`, { cache: "no-store" })
-      .then(async (res) => {
+    let timer: number | null = null;
+
+    async function check() {
+      try {
+        const res = await fetch(`/api/pair/${encodeURIComponent(code)}`, {
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => ({}));
         if (cancelled) return;
-        if (!res.ok) {
-          setValid(false);
-          const data = await res.json().catch(() => ({}));
-          setError(data.error ?? "Pair code is not valid.");
+
+        if (res.status === 404 || res.status === 410) {
+          applyStatus(res, data);
           return;
         }
-        const data = await res.json();
-        setValid(true);
-        setExpiresAt(data.expiresAt);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setValid(false);
-          setError("Could not reach the server.");
+        if (!res.ok) {
+          applyStatus(res, data);
+          return;
         }
-      });
+
+        setSession({ status: "active", expiresAt: data.expiresAt });
+        timer = window.setTimeout(check, 2000);
+      } catch {
+        if (!cancelled) {
+          timer = window.setTimeout(check, 3000);
+        }
+      }
+    }
+
+    check();
     return () => {
       cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
     };
-  }, [code]);
+  }, [code, applyStatus]);
 
-  // Tiny debounce so a single barcode read doesn't fire repeatedly.
   const lastSentAtRef = useRef(0);
   const handleScanned = useCallback(
     async (barcode: string) => {
+      if (session.status !== "active") return;
       const trimmed = barcode.trim();
       if (!trimmed) return;
       const now = Date.now();
@@ -65,16 +108,20 @@ export default function PhonePairPage({ params }: PageProps) {
       setSending(false);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        if (res.status === 404 || res.status === 410) {
+          applyStatus(res, data);
+          return;
+        }
         setError(data.error ?? "Could not send scan.");
         return;
       }
       setLastSent(trimmed);
       if (navigator.vibrate) navigator.vibrate(60);
     },
-    [code, lastSent]
+    [code, lastSent, session.status, applyStatus]
   );
 
-  if (valid === null) {
+  if (session.status === "loading") {
     return (
       <div className="mx-auto mt-20 max-w-md text-center text-sm text-slate-500">
         Checking pair code…
@@ -82,18 +129,22 @@ export default function PhonePairPage({ params }: PageProps) {
     );
   }
 
-  if (!valid) {
+  if (session.status === "invalid" || session.status === "ended") {
     return (
       <div className="mx-auto mt-16 max-w-md">
         <div className="card p-6 text-center">
           <h1 className="text-xl font-semibold text-slate-900">
-            Pair code invalid
+            {session.status === "ended"
+              ? "Pairing ended"
+              : "Pair code invalid"}
           </h1>
-          <p className="mt-2 text-sm text-slate-500">
-            {error ??
-              "Ask the desktop user to generate a new pair code on the Scan page."}
-          </p>
+          <p className="mt-2 text-sm text-slate-500">{session.message}</p>
           <p className="mt-4 font-mono text-xs text-slate-400">{code}</p>
+          {session.status === "ended" ? (
+            <p className="mt-3 text-xs text-slate-400">
+              Ask the desktop user to start a new pair code on the Scan page.
+            </p>
+          ) : null}
         </div>
       </div>
     );
@@ -108,11 +159,10 @@ export default function PhonePairPage({ params }: PageProps) {
         <div className="mt-1 font-mono text-2xl font-semibold text-slate-900">
           {code}
         </div>
-        {expiresAt ? (
-          <div className="mt-1 text-xs text-slate-400">
-            Expires {new Date(expiresAt).toLocaleTimeString()}
-          </div>
-        ) : null}
+        <div className="mt-1 text-xs text-slate-400">
+          Expires {new Date(session.expiresAt).toLocaleTimeString()}
+        </div>
+        <div className="mt-1 text-xs text-emerald-600">Connected</div>
       </div>
 
       <BarcodeScanner onResult={handleScanned} paused={!scannerOn} />

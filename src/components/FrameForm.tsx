@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Combobox } from "@/components/Combobox";
 import { CurrencyInput } from "@/components/CurrencyInput";
+import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 
 export type FrameFormValues = {
@@ -48,6 +49,7 @@ export function FrameForm({
   const [values, setValues] = useState<FrameFormValues>({ ...empty, ...initial });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [lossWarningOpen, setLossWarningOpen] = useState(false);
   const [manufacturerSuggestions, setManufacturerSuggestions] = useState<
     string[]
   >([]);
@@ -70,29 +72,7 @@ export function FrameForm({
     setValues((prev) => ({ ...prev, [key]: v }));
   }
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    // Client-side safety net (server still validates with zod).
-    const cost = Number(values.cost || 0);
-    const retail = Number(values.retailCost || 0);
-    if (!Number.isFinite(cost) || cost < 0) {
-      setError("Cost must be a positive number.");
-      return;
-    }
-    if (!Number.isFinite(retail) || retail < 0) {
-      setError("Retail cost must be a positive number.");
-      return;
-    }
-    if (retail > 0 && cost > retail) {
-      // Soft warning, but allow it — sometimes you sell at a loss.
-      const proceed = window.confirm(
-        "Retail price is less than cost. Save anyway?"
-      );
-      if (!proceed) return;
-    }
-
+  async function saveFrame() {
     setSubmitting(true);
 
     const payload = {
@@ -100,8 +80,8 @@ export function FrameForm({
       style: values.style.trim(),
       color: values.color.trim(),
       description: values.description.trim(),
-      cost,
-      retailCost: retail,
+      cost: Number(values.cost || 0),
+      retailCost: Number(values.retailCost || 0),
       size: values.size.trim() || null,
       notes: values.notes.trim() || null,
     };
@@ -130,8 +110,32 @@ export function FrameForm({
     }
   }
 
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    // Client-side safety net (server still validates with zod).
+    const cost = Number(values.cost || 0);
+    const retail = Number(values.retailCost || 0);
+    if (!Number.isFinite(cost) || cost < 0) {
+      setError("Cost must be a positive number.");
+      return;
+    }
+    if (!Number.isFinite(retail) || retail < 0) {
+      setError("Retail cost must be a positive number.");
+      return;
+    }
+    if (retail > 0 && cost > retail) {
+      setLossWarningOpen(true);
+      return;
+    }
+
+    await saveFrame();
+  }
+
   return (
-    <form onSubmit={onSubmit} className="card space-y-5 p-6">
+    <>
+      <form onSubmit={onSubmit} className="card space-y-5 p-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="manufacturer" className="label">
@@ -238,6 +242,44 @@ export function FrameForm({
         </button>
       </div>
     </form>
+
+      <Modal
+        open={lossWarningOpen}
+        onClose={() => !submitting && setLossWarningOpen(false)}
+        busy={submitting}
+        size="sm"
+        title="Retail is below cost"
+        description="You're saving a frame where retail price is less than cost."
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setLossWarningOpen(false)}
+              disabled={submitting}
+              className="btn-secondary"
+            >
+              Go back
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => {
+                setLossWarningOpen(false);
+                void saveFrame();
+              }}
+              className="btn-primary"
+            >
+              {submitting ? "Saving…" : "Save anyway"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          That&apos;s okay for clearance or damaged stock — just confirming
+          before we save.
+        </p>
+      </Modal>
+    </>
   );
 }
 
