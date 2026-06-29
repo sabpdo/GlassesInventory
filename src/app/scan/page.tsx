@@ -164,7 +164,10 @@ export default function ScanPage() {
     const res = await fetch("/api/items", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ barcode: lookup.barcode, frameId: selectedFrameId }),
+      body: JSON.stringify({
+        barcode: lookup.barcode,
+        frameId: selectedFrameId,
+      }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -234,8 +237,8 @@ export default function ScanPage() {
           Scan barcode
         </h1>
         <p className="text-sm text-slate-500">
-          Scan with this device's camera, or pair your phone to scan from there
-          while you work here.
+          Scan with this device&apos;s camera, or pair your phone to scan from
+          there while you work here.
         </p>
       </div>
 
@@ -439,10 +442,7 @@ function KnownItem({
             >
               {busy ? "Marking…" : "Mark as sold"}
             </button>
-            <Link
-              href={`/frames/${item.frame.id}`}
-              className="btn-secondary"
-            >
+            <Link href={`/frames/${item.frame.id}`} className="btn-secondary">
               Open frame
             </Link>
           </div>

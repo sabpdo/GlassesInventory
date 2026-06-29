@@ -106,6 +106,7 @@ export function Combobox({
         required={required}
         autoComplete="off"
         role="combobox"
+        aria-controls={id ? `${id}-listbox` : undefined}
         aria-expanded={showDropdown}
         aria-autocomplete="list"
         className="input"
@@ -113,6 +114,7 @@ export function Combobox({
       {showDropdown ? (
         <ul
           ref={listRef}
+          id={id ? `${id}-listbox` : undefined}
           role="listbox"
           className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-md bg-white py-1 shadow-lg ring-1 ring-slate-200"
         >
