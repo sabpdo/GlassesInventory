@@ -39,8 +39,7 @@ export default function RegisterPage() {
       router.push("/login");
       return;
     }
-    router.push(signinRes?.url ?? "/");
-    router.refresh();
+    window.location.assign(signinRes?.url ?? "/");
   }
 
   return (

@@ -48,6 +48,10 @@ export const authOptions: NextAuthOptions = {
   providers,
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
+  // Required on Vercel so callbacks/cookies use the deployed host, not localhost.
+  ...(process.env.NODE_ENV === "production"
+    ? { trustHost: true }
+    : {}),
   callbacks: {
     async signIn({ user, account }) {
       // Auto-provision a local user row for Google sign-ins so we have a

@@ -2,11 +2,10 @@
 
 import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 function LoginForm() {
-  const router = useRouter();
   const params = useSearchParams();
   const callbackUrl = params.get("callbackUrl") || "/";
 
@@ -36,8 +35,9 @@ function LoginForm() {
       setError("Invalid email or password.");
       return;
     }
-    router.push(res?.url ?? callbackUrl);
-    router.refresh();
+    // Full page load so the session cookie is definitely sent on the next
+    // request (router.push alone can race middleware on Vercel).
+    window.location.assign(res?.url ?? callbackUrl);
   }
 
   return (
