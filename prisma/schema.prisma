@@ -1,0 +1,96 @@
+// Prisma schema for the Glasses Inventory app.
+// Uses Postgres (Neon) for both local dev and production. Use a separate
+// Neon branch for local development to keep prod data clean.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String?  // null for OAuth-only accounts
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  framesCreated Frame[] @relation("FrameCreator")
+  itemsCreated  Item[]  @relation("ItemCreator")
+  itemsSold     Item[]  @relation("ItemSeller")
+}
+
+// A Frame is a unique glasses style (Manufacturer + Style + Color combo).
+// Multiple physical Items can share the same Frame.
+model Frame {
+  id           String   @id @default(cuid())
+  manufacturer String   // a.k.a. Vendor
+  style        String
+  color        String
+  description  String   // a.k.a. Model Style Number
+  cost         Float    @default(0)
+  retailCost   Float    @default(0)
+  size         String?  // optional
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items Item[]
+
+  // Who first created this frame style. Nullable so frames survive if the
+  // user is later deleted.
+  createdById String?
+  createdBy   User?   @relation("FrameCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([manufacturer])
+  @@index([description])
+}
+
+// An Item is a single physical pair of glasses tied to a scanned barcode.
+// Inventory quantity for a frame = count of items where status = "IN_STOCK".
+// Stored as a string instead of a Postgres enum so it's easy to add new
+// statuses in app code without a schema migration.
+model Item {
+  id        String    @id @default(cuid())
+  // Optional: older / damaged frames may not have a barcode. Multiple
+  // null values are allowed (Postgres treats NULLs as distinct under
+  // UNIQUE), and these items show up as "—" in the items table.
+  barcode   String?   @unique
+  frameId   String
+  status    String    @default("IN_STOCK") // "IN_STOCK" | "SOLD"
+  soldAt    DateTime?
+  soldPrice Float?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  frame Frame @relation(fields: [frameId], references: [id], onDelete: Cascade)
+
+  // Audit trail: who added this physical item, and who marked it sold.
+  // Both nullable so a deleted user doesn't erase the sales history.
+  createdById String?
+  createdBy   User?   @relation("ItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  soldById    String?
+  soldBy      User?   @relation("ItemSeller", fields: [soldById], references: [id], onDelete: SetNull)
+
+  @@index([frameId])
+  @@index([status])
+}
+
+// A short-lived link between a desktop browser and a phone-as-scanner.
+// The desktop POSTs to /api/pair to get a code, the phone visits /p/<code>
+// to send scans, and the desktop polls /api/pair/<code> to receive them.
+model PairingSession {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  lastBarcode   String?
+  lastBarcodeAt DateTime?
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+
+  @@index([expiresAt])
+}
