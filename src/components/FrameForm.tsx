@@ -5,7 +5,9 @@ import { useEffect, useState } from "react";
 import { Combobox } from "@/components/Combobox";
 import { CurrencyInput } from "@/components/CurrencyInput";
 import { Modal } from "@/components/Modal";
+import { ScanModal } from "@/components/ScanModal";
 import { COLOR_SUGGESTIONS } from "@/lib/colors";
+import { normalizeLabel } from "@/lib/normalize-label";
 import { useToast } from "@/components/Toast";
 
 export type FrameFormValues = {
@@ -44,12 +46,15 @@ export function FrameForm({
   submitLabel = "Save",
   onSaved,
   onCancel,
+  /** When set (e.g. from Scan page), barcode is fixed and shown read-only. */
+  lockedBarcode,
 }: {
   initial?: Partial<FrameFormValues>;
   frameId?: string;
   submitLabel?: string;
   onSaved?: (frameId: string) => void;
   onCancel?: () => void;
+  lockedBarcode?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -57,26 +62,38 @@ export function FrameForm({
   const [values, setValues] = useState<FrameFormValues>({
     ...empty,
     ...initial,
-    quantity: initial?.quantity ?? (frameId ? "" : "1"),
-    barcode: initial?.barcode ?? "",
+    quantity: initial?.quantity ?? (frameId ? "" : lockedBarcode ? "1" : "1"),
+    barcode: lockedBarcode ?? initial?.barcode ?? "",
     markSold: initial?.markSold ?? false,
     soldPrice: initial?.soldPrice ?? "",
   });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [lossWarningOpen, setLossWarningOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [manufacturerSuggestions, setManufacturerSuggestions] = useState<
     string[]
   >([]);
+  const [colorSuggestions, setColorSuggestions] = useState<string[]>([
+    ...COLOR_SUGGESTIONS,
+  ]);
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/manufacturer-suggestions", {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: string[]) => setManufacturerSuggestions(data))
+    Promise.all([
+      fetch("/api/manufacturer-suggestions", {
+        signal: controller.signal,
+        cache: "no-store",
+      }),
+      fetch("/api/color-suggestions", {
+        signal: controller.signal,
+        cache: "no-store",
+      }),
+    ])
+      .then(async ([mRes, cRes]) => {
+        if (mRes.ok) setManufacturerSuggestions(await mRes.json());
+        if (cRes.ok) setColorSuggestions(await cRes.json());
+      })
       .catch(() => {});
     return () => controller.abort();
   }, []);
@@ -88,13 +105,26 @@ export function FrameForm({
     setValues((prev) => ({ ...prev, [key]: v }));
   }
 
+  function normalizeManufacturer() {
+    const next = normalizeLabel(values.manufacturer, manufacturerSuggestions);
+    if (next !== values.manufacturer) update("manufacturer", next);
+  }
+
+  function normalizeColor() {
+    const next = normalizeLabel(values.color, colorSuggestions);
+    if (next !== values.color) update("color", next);
+  }
+
   async function saveFrame() {
     setSubmitting(true);
 
     const payload: Record<string, unknown> = {
-      manufacturer: values.manufacturer.trim(),
+      manufacturer: normalizeLabel(
+        values.manufacturer,
+        manufacturerSuggestions
+      ),
       style: values.style.trim(),
-      color: values.color.trim(),
+      color: normalizeLabel(values.color, colorSuggestions),
       description: values.description.trim() || null,
       cost: Number(values.cost || 0),
       retailCost: Number(values.retailCost || 0),
@@ -103,7 +133,7 @@ export function FrameForm({
     };
 
     if (isCreate) {
-      const barcode = values.barcode.trim();
+      const barcode = (lockedBarcode ?? values.barcode).trim();
       const qtyRaw = values.quantity.trim();
       const quantity = qtyRaw === "" ? 0 : Number(qtyRaw);
       payload.barcode = barcode || null;
@@ -175,13 +205,25 @@ export function FrameForm({
 
   const hasInventory =
     isCreate &&
-    (values.barcode.trim() !== "" ||
+    (lockedBarcode ||
+      values.barcode.trim() !== "" ||
       (values.quantity.trim() !== "" && Number(values.quantity) > 0) ||
       values.markSold);
 
   return (
     <>
       <form onSubmit={onSubmit} className="card space-y-5 p-6">
+        {lockedBarcode ? (
+          <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">
+              Scanned barcode
+            </div>
+            <div className="mt-1 font-mono text-sm text-slate-900">
+              {lockedBarcode}
+            </div>
+          </div>
+        ) : null}
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="manufacturer" className="label">
@@ -196,6 +238,7 @@ export function FrameForm({
                 options={manufacturerSuggestions}
                 placeholder="Start typing a brand…"
                 required
+                onBlur={normalizeManufacturer}
               />
             </div>
           </div>
@@ -216,9 +259,10 @@ export function FrameForm({
                 id="color"
                 value={values.color}
                 onChange={(v) => update("color", v)}
-                options={COLOR_SUGGESTIONS}
+                options={colorSuggestions}
                 placeholder="Black, Tortoise, Silver…"
                 required
+                onBlur={normalizeColor}
               />
             </div>
           </div>
@@ -265,37 +309,58 @@ export function FrameForm({
         {isCreate ? (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <h3 className="text-sm font-semibold text-slate-900">
-              Initial inventory (optional)
+              {lockedBarcode ? "This item" : "Initial inventory (optional)"}
             </h3>
             <p className="mt-1 text-xs text-slate-500">
-              Most frames only need quantity 1. Leave both blank to add items
-              later from the frame page or Scan.
+              {lockedBarcode
+                ? "Fill in the frame details below. Check “Mark as sold” if this pair is leaving the shop now."
+                : "Most frames only need quantity 1. Leave blank to add items later."}
             </p>
-            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field
-                id="quantity"
-                label="Quantity"
-                type="number"
-                inputMode="numeric"
-                placeholder="1"
-                value={values.barcode.trim() ? "" : values.quantity}
-                onChange={(v) => update("quantity", v)}
-                hint={
-                  values.barcode.trim()
-                    ? "Ignored when a barcode is set."
-                    : "How many pairs to add (no barcode)."
-                }
-                disabled={values.barcode.trim() !== ""}
-              />
-              <Field
-                id="barcode"
-                label="Barcode (optional)"
-                placeholder="Scan or type one barcode"
-                value={values.barcode}
-                onChange={(v) => update("barcode", v)}
-                hint="Adds exactly one item with this barcode."
-              />
-            </div>
+            {!lockedBarcode ? (
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field
+                  id="quantity"
+                  label="Quantity"
+                  type="number"
+                  inputMode="numeric"
+                  placeholder="1"
+                  value={values.barcode.trim() ? "" : values.quantity}
+                  onChange={(v) => update("quantity", v)}
+                  hint={
+                    values.barcode.trim()
+                      ? "Ignored when a barcode is set."
+                      : "How many pairs to add (no barcode)."
+                  }
+                  disabled={values.barcode.trim() !== ""}
+                />
+                <div>
+                  <label htmlFor="barcode" className="label">
+                    Barcode (optional)
+                  </label>
+                  <div className="mt-1 flex rounded-md ring-1 ring-slate-300 focus-within:ring-2 focus-within:ring-brand-500">
+                    <input
+                      id="barcode"
+                      type="text"
+                      placeholder="Type a barcode…"
+                      value={values.barcode}
+                      onChange={(e) => update("barcode", e.target.value)}
+                      className="input flex-1 rounded-r-none border-0 shadow-none ring-0 focus:ring-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setScanOpen(true)}
+                      title="Scan with camera"
+                      className="border-l border-slate-300 px-3 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      📷
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Scan or type one barcode — adds exactly one item.
+                  </p>
+                </div>
+              </div>
+            ) : null}
             <label className="mt-4 flex cursor-pointer items-start gap-2">
               <input
                 type="checkbox"
@@ -399,6 +464,17 @@ export function FrameForm({
           before we save.
         </p>
       </Modal>
+
+      <ScanModal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onScanned={(b) => {
+          update("barcode", b);
+          setScanOpen(false);
+        }}
+        title="Scan barcode"
+        description="Point the camera at the barcode to attach to this frame."
+      />
     </>
   );
 }

@@ -12,8 +12,8 @@ export default function NewFramePage() {
           New frame
         </h1>
         <p className="text-sm text-slate-500">
-          Add a frame style. Optionally set quantity, attach a barcode, or mark
-          the first item sold — or add inventory later from Scan.
+          Add a frame style. Optionally set quantity, scan or type a barcode, or
+          mark the first item sold — or add inventory later from Scan.
         </p>
       </div>
       <FrameForm submitLabel="Create frame" />

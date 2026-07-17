@@ -9,6 +9,7 @@ type Props = {
   options: string[];
   placeholder?: string;
   required?: boolean;
+  onBlur?: () => void;
   /** Max number of suggestions to render in the dropdown. */
   maxOptions?: number;
 };
@@ -23,6 +24,7 @@ export function Combobox({
   options,
   placeholder,
   required = false,
+  onBlur,
   maxOptions = 50,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -101,6 +103,10 @@ export function Combobox({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
+        onBlur={() => {
+          setOpen(false);
+          onBlur?.();
+        }}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         required={required}

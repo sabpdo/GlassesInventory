@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { resolveColor, resolveManufacturer } from "@/lib/resolve-labels";
 
 const updateSchema = z.object({
   manufacturer: z.string().min(1),
@@ -50,9 +51,13 @@ export async function PUT(req: Request, { params }: RouteParams) {
       { status: 400 }
     );
   }
+  const data = parsed.data;
+  data.manufacturer = await resolveManufacturer(prisma, data.manufacturer);
+  data.color = await resolveColor(prisma, data.color);
+
   const frame = await prisma.frame.update({
     where: { id: params.id },
-    data: parsed.data,
+    data,
   });
   return NextResponse.json(frame);
 }

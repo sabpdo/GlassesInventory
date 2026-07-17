@@ -1,17 +1,22 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { COLOR_SUGGESTIONS } from "@/lib/colors";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const rows = await prisma.frame.findMany({
-    select: { manufacturer: true },
-    distinct: ["manufacturer"],
+    select: { color: true },
+    distinct: ["color"],
   });
 
   const seen = new Map<string, string>();
   for (const r of rows) {
-    seen.set(r.manufacturer.toLowerCase(), r.manufacturer);
+    seen.set(r.color.toLowerCase(), r.color);
+  }
+  for (const c of COLOR_SUGGESTIONS) {
+    const key = c.toLowerCase();
+    if (!seen.has(key)) seen.set(key, c);
   }
 
   const merged = Array.from(seen.values()).sort((a, b) =>

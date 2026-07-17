@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { resolveColor, resolveManufacturer } from "@/lib/resolve-labels";
 
 const frameSchema = z.object({
   manufacturer: z.string().min(1, "Manufacturer is required"),
@@ -119,6 +120,12 @@ export async function POST(req: Request) {
   }
 
   const { quantity, barcode, markSold, soldPrice, ...frameData } = parsed.data;
+
+  frameData.manufacturer = await resolveManufacturer(
+    prisma,
+    frameData.manufacturer
+  );
+  frameData.color = await resolveColor(prisma, frameData.color);
 
   const frame = await prisma.frame.create({
     data: { ...frameData, createdById: auth.userId },

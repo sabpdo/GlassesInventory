@@ -79,9 +79,7 @@ function ScanPageInner() {
         if (!res.ok) throw new Error("Lookup failed");
         const data: ItemLookup = await res.json();
         setLookup(data);
-        setSoldPrice(
-          data.item?.frame.retailCost ? String(data.item.frame.retailCost) : ""
-        );
+        setSoldPrice("");
         if (!data.found && !framesLoaded) loadFrames();
       } catch (e) {
         setError((e as Error).message);
@@ -160,7 +158,7 @@ function ScanPageInner() {
       ? ` for ${formatCurrency(Number(soldPrice))}`
       : "";
     toast.success(`Sold ${frame.manufacturer} ${frame.style}${priceLabel}`);
-    await runLookup(lookup.item.barcode);
+    reset();
     router.refresh();
   }
 
@@ -190,38 +188,14 @@ function ScanPageInner() {
       return;
     }
     toast.success(`Barcode attached`);
-    await runLookup(lookup.barcode);
+    reset();
     router.refresh();
   }
 
-  // Called by FrameForm after a brand-new frame has been created inline
-  // on the scan page. We immediately bind the scanned barcode to that
-  // new frame so the user doesn't have to rescan / re-attach.
-  async function onNewFrameCreated(frameId: string) {
-    if (!lookup) return;
-    setBusy(true);
-    setError(null);
-    const res = await fetch("/api/items", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ barcode: lookup.barcode, frameId }),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      const msg =
-        data.error ??
-        "Frame was created but the barcode couldn't be attached. Add it from the frame page.";
-      setError(msg);
-      toast.error(msg);
-      // Still refresh the frames list so the new frame is selectable.
-      await loadFrames();
-      return;
-    }
-    toast.success("Frame created and barcode attached");
-    await loadFrames();
-    await runLookup(lookup.barcode);
+  function onFrameCreatedFromScan() {
+    reset();
     router.refresh();
+    loadFrames();
   }
 
   function reset() {
@@ -249,8 +223,9 @@ function ScanPageInner() {
           Scan barcode
         </h1>
         <p className="text-sm text-slate-500">
-          Pair your phone to scan while you work on this computer — or use this
-          device&apos;s camera.
+          Scan to check out an item already in inventory, or to add a new
+          barcode. Pair your phone to scan while you work on this computer — or
+          use this device&apos;s camera.
         </p>
       </div>
 
@@ -353,7 +328,7 @@ function ScanPageInner() {
               selectedFrameId={selectedFrameId}
               setSelectedFrameId={setSelectedFrameId}
               onAttach={attachToFrame}
-              onNewFrameCreated={onNewFrameCreated}
+              onFrameCreated={onFrameCreatedFromScan}
               busy={busy}
             />
           )}
@@ -426,11 +401,11 @@ function KnownItem({
       ) : (
         <div className="rounded-md bg-brand-50 px-4 py-4 ring-1 ring-brand-100">
           <div className="text-base font-semibold text-brand-700">
-            Is this sold?
+            Check out — mark as sold
           </div>
           <p className="mt-1 text-sm text-slate-600">
-            Marking sold records the time, sets status to Sold, and decreases
-            inventory by 1.
+            This barcode is already in inventory. Mark sold when a customer buys
+            it.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <div>
@@ -442,7 +417,7 @@ function KnownItem({
                   id="soldPrice"
                   value={soldPrice}
                   onChange={setSoldPrice}
-                  placeholder={String(item.frame.retailCost || "0.00")}
+                  placeholder="0.00"
                 />
               </div>
             </div>
@@ -470,7 +445,7 @@ function NewBarcode({
   selectedFrameId,
   setSelectedFrameId,
   onAttach,
-  onNewFrameCreated,
+  onFrameCreated,
   busy,
 }: {
   barcode: string;
@@ -478,22 +453,21 @@ function NewBarcode({
   selectedFrameId: string;
   setSelectedFrameId: (v: string) => void;
   onAttach: (e: React.FormEvent) => void;
-  onNewFrameCreated: (frameId: string) => void;
+  onFrameCreated: () => void;
   busy: boolean;
 }) {
-  // Default mode: if we have existing frames offer "attach"; otherwise
-  // jump straight to the new-frame form (no point in showing an empty picker).
   const [mode, setMode] = useState<"attach" | "create">("create");
 
   return (
     <div className="mt-4 space-y-4">
       <div className="rounded-md bg-brand-50 px-4 py-3 ring-1 ring-brand-100">
         <div className="text-base font-semibold text-brand-700">
-          New barcode
+          New barcode — add to inventory
         </div>
         <p className="mt-1 text-sm text-slate-600">
-          This barcode isn&apos;t in the system yet. Attach it to an existing
-          frame, or create a new frame and we&apos;ll attach it for you.
+          This barcode isn&apos;t in the system yet. Create a new frame below
+          (use “Mark as sold” if it&apos;s leaving the shop now), or attach it
+          to an existing frame.
         </p>
       </div>
 
@@ -565,18 +539,11 @@ function NewBarcode({
           </div>
         </form>
       ) : (
-        <div className="space-y-3">
-          <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
-            After you save, barcode{" "}
-            <span className="font-mono text-slate-900">{barcode}</span> will be
-            attached to this new frame automatically — no need to rescan.
-          </div>
-          <FrameForm
-            submitLabel="Create frame & attach barcode"
-            onSaved={(frameId) => onNewFrameCreated(frameId)}
-            onCancel={() => setMode("attach")}
-          />
-        </div>
+        <FrameForm
+          lockedBarcode={barcode}
+          submitLabel="Save frame"
+          onSaved={() => onFrameCreated()}
+        />
       )}
     </div>
   );

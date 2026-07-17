@@ -50,6 +50,14 @@ export function FrameDetail({ frame }: { frame: Frame }) {
   const [noBarcodeBusy, setNoBarcodeBusy] = useState(false);
   const [noBarcodeError, setNoBarcodeError] = useState<string | null>(null);
 
+  // Item detail modal (click row)
+  const [editItem, setEditItem] = useState<Item | null>(null);
+  const [editSoldPrice, setEditSoldPrice] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deleteItemTarget, setDeleteItemTarget] = useState<Item | null>(null);
+  const [deleteItemBusy, setDeleteItemBusy] = useState(false);
+
   // Mark-sold modal state
   const [sellItem, setSellItem] = useState<Item | null>(null);
   const [soldPrice, setSoldPrice] = useState("");
@@ -140,8 +148,84 @@ export function FrameDetail({ frame }: { frame: Frame }) {
 
   function openSellDialog(item: Item) {
     setSellItem(item);
-    setSoldPrice(frame.retailCost ? String(frame.retailCost) : "");
+    setSoldPrice("");
     setSellError(null);
+  }
+
+  function openItemDetail(item: Item) {
+    setEditItem(item);
+    setEditSoldPrice(item.soldPrice != null ? String(item.soldPrice) : "");
+    setEditError(null);
+  }
+
+  function closeItemDetail() {
+    if (editBusy) return;
+    setEditItem(null);
+    setEditSoldPrice("");
+    setEditError(null);
+  }
+
+  async function markUnsold(item: Item) {
+    setEditBusy(true);
+    setEditError(null);
+    const res = await fetch(`/api/items/${item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "IN_STOCK" }),
+    });
+    setEditBusy(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const msg = data.error ?? "Could not mark as unsold.";
+      setEditError(msg);
+      toast.error(msg);
+      return;
+    }
+    toast.success("Item marked back in stock");
+    setEditItem(null);
+    router.refresh();
+  }
+
+  async function saveItemSoldPrice(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editItem) return;
+    setEditBusy(true);
+    setEditError(null);
+    const res = await fetch(`/api/items/${editItem.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        soldPrice: editSoldPrice.trim() === "" ? null : Number(editSoldPrice),
+      }),
+    });
+    setEditBusy(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const msg = data.error ?? "Could not update sold price.";
+      setEditError(msg);
+      return;
+    }
+    toast.success("Sold price updated");
+    setEditItem(null);
+    router.refresh();
+  }
+
+  async function confirmDeleteItem() {
+    if (!deleteItemTarget) return;
+    setDeleteItemBusy(true);
+    const res = await fetch(`/api/items/${deleteItemTarget.id}`, {
+      method: "DELETE",
+    });
+    setDeleteItemBusy(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data.error ?? "Could not delete item.");
+      return;
+    }
+    toast.success("Item deleted");
+    setDeleteItemTarget(null);
+    setEditItem(null);
+    router.refresh();
   }
 
   function closeSellDialog() {
@@ -269,7 +353,8 @@ export function FrameDetail({ frame }: { frame: Frame }) {
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Items</h2>
             <p className="text-sm text-slate-500">
-              Each item is a single physical pair tied to a unique barcode.
+              Each row is one physical pair. Click a row to edit, mark unsold,
+              or delete.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -348,7 +433,11 @@ export function FrameDetail({ frame }: { frame: Frame }) {
                 </tr>
               ) : (
                 frame.items.map((it) => (
-                  <tr key={it.id} className="hover:bg-slate-50">
+                  <tr
+                    key={it.id}
+                    onClick={() => openItemDetail(it)}
+                    className="cursor-pointer hover:bg-slate-50"
+                  >
                     <td className="px-4 py-3 font-mono text-xs text-slate-700">
                       {it.barcode ?? (
                         <span className="font-sans italic text-slate-400">
@@ -397,12 +486,17 @@ export function FrameDetail({ frame }: { frame: Frame }) {
                       {it.status === "IN_STOCK" ? (
                         <button
                           type="button"
-                          onClick={() => openSellDialog(it)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openSellDialog(it);
+                          }}
                           className="text-sm font-medium text-brand-700 hover:text-brand-600"
                         >
                           Mark sold
                         </button>
-                      ) : null}
+                      ) : (
+                        <span className="text-xs text-slate-400">View →</span>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -533,6 +627,178 @@ export function FrameDetail({ frame }: { frame: Frame }) {
             </p>
           ) : null}
         </form>
+      </Modal>
+
+      {/* Item detail / edit modal */}
+      <Modal
+        open={editItem !== null}
+        onClose={closeItemDetail}
+        busy={editBusy}
+        title="Item"
+        description={
+          editItem
+            ? editItem.barcode
+              ? `Barcode ${editItem.barcode}`
+              : "No barcode"
+            : undefined
+        }
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                if (editItem) setDeleteItemTarget(editItem);
+              }}
+              disabled={editBusy}
+              className="btn-danger mr-auto"
+            >
+              Delete item
+            </button>
+            <button
+              type="button"
+              onClick={closeItemDetail}
+              disabled={editBusy}
+              className="btn-secondary"
+            >
+              Close
+            </button>
+            {editItem?.status === "SOLD" ? (
+              <button
+                type="submit"
+                form="edit-item-form"
+                disabled={editBusy}
+                className="btn-primary"
+              >
+                {editBusy ? "Saving…" : "Save price"}
+              </button>
+            ) : null}
+          </>
+        }
+      >
+        {editItem ? (
+          <div className="space-y-4 text-sm">
+            <div className="flex items-center gap-2">
+              <span
+                className={
+                  "inline-flex rounded-full px-2 py-0.5 text-xs font-semibold " +
+                  (editItem.status === "SOLD"
+                    ? "bg-slate-200 text-slate-700"
+                    : "bg-emerald-100 text-emerald-700")
+                }
+              >
+                {editItem.status === "SOLD" ? "Sold" : "In stock"}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-slate-600">
+              <div>
+                <div className="text-xs uppercase text-slate-400">Added</div>
+                <div>{formatDate(editItem.createdAt)}</div>
+                {editItem.createdByName ? (
+                  <div className="text-xs text-slate-400">
+                    by {editItem.createdByName}
+                  </div>
+                ) : null}
+              </div>
+              {editItem.soldAt ? (
+                <div>
+                  <div className="text-xs uppercase text-slate-400">Sold</div>
+                  <div>{formatDate(editItem.soldAt)}</div>
+                  {editItem.soldByName ? (
+                    <div className="text-xs text-slate-400">
+                      by {editItem.soldByName}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            {editItem.status === "SOLD" ? (
+              <>
+                <form id="edit-item-form" onSubmit={saveItemSoldPrice}>
+                  <label htmlFor="edit-sold-price" className="label">
+                    Sold price
+                  </label>
+                  <div className="mt-1">
+                    <CurrencyInput
+                      id="edit-sold-price"
+                      value={editSoldPrice}
+                      onChange={setEditSoldPrice}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </form>
+                <button
+                  type="button"
+                  disabled={editBusy}
+                  onClick={() => markUnsold(editItem)}
+                  className="btn-secondary w-full"
+                >
+                  {editBusy ? "Updating…" : "Mark back in stock (unsold)"}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                disabled={editBusy}
+                onClick={() => {
+                  closeItemDetail();
+                  openSellDialog(editItem);
+                }}
+                className="btn-primary w-full"
+              >
+                Mark as sold
+              </button>
+            )}
+
+            {editError ? (
+              <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+                {editError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* Delete single item */}
+      <Modal
+        open={deleteItemTarget !== null}
+        onClose={() => !deleteItemBusy && setDeleteItemTarget(null)}
+        busy={deleteItemBusy}
+        size="sm"
+        title="Delete this item?"
+        description={
+          deleteItemTarget?.barcode
+            ? `Barcode ${deleteItemTarget.barcode}`
+            : "Item without barcode"
+        }
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setDeleteItemTarget(null)}
+              disabled={deleteItemBusy}
+              className="btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteItem}
+              disabled={deleteItemBusy}
+              className="btn-danger"
+            >
+              {deleteItemBusy ? "Deleting…" : "Delete item"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          Removes this physical pair from inventory
+          {deleteItemTarget?.status === "SOLD"
+            ? " and erases its sale record"
+            : ""}
+          . The frame style stays — only this item is deleted.
+        </p>
       </Modal>
 
       {/* Delete-frame confirmation modal */}
