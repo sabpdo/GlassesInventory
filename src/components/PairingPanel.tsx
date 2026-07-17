@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Props = {
   enabled: boolean;
   onBarcode: (barcode: string) => void;
+  /** Shorter copy when embedded in a form field modal vs full scan page. */
+  context?: "scan-page" | "field";
 };
 
 type Session = {
@@ -14,7 +16,11 @@ type Session = {
   appOrigin?: string;
 };
 
-export function PairingPanel({ enabled, onBarcode }: Props) {
+export function PairingPanel({
+  enabled,
+  onBarcode,
+  context = "scan-page",
+}: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -237,8 +243,10 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
                   barcodes on the phone — results appear on this computer.
                 </li>
                 <li>
-                  <span className="font-medium text-slate-900">3.</span> Finish
-                  each scan below (sold? attach to frame?).
+                  <span className="font-medium text-slate-900">3.</span>{" "}
+                  {context === "field"
+                    ? "The barcode fills in here automatically."
+                    : "Finish each scan below (sold? attach to frame?)."}
                 </li>
               </ol>
               {pairUrl ? (

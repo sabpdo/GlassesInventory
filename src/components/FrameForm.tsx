@@ -48,6 +48,9 @@ export function FrameForm({
   onCancel,
   /** When set (e.g. from Scan page), barcode is fixed and shown read-only. */
   lockedBarcode,
+  /** Nested inside another card (e.g. Scan results) — no outer card styling. */
+  embedded = false,
+  cancelLabel = "Cancel",
 }: {
   initial?: Partial<FrameFormValues>;
   frameId?: string;
@@ -55,6 +58,8 @@ export function FrameForm({
   onSaved?: (frameId: string) => void;
   onCancel?: () => void;
   lockedBarcode?: string;
+  embedded?: boolean;
+  cancelLabel?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -184,7 +189,7 @@ export function FrameForm({
     }
 
     if (isCreate) {
-      const barcode = values.barcode.trim();
+      const barcode = (lockedBarcode ?? values.barcode).trim();
       const qtyRaw = values.quantity.trim();
       if (!barcode && qtyRaw !== "") {
         const quantity = Number(qtyRaw);
@@ -212,8 +217,11 @@ export function FrameForm({
 
   return (
     <>
-      <form onSubmit={onSubmit} className="card space-y-5 p-6">
-        {lockedBarcode ? (
+      <form
+        onSubmit={onSubmit}
+        className={embedded ? "space-y-5" : "card space-y-5 p-6"}
+      >
+        {lockedBarcode && !embedded ? (
           <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">
               Scanned barcode
@@ -349,7 +357,7 @@ export function FrameForm({
                     <button
                       type="button"
                       onClick={() => setScanOpen(true)}
-                      title="Scan with camera"
+                      title="Scan barcode"
                       className="border-l border-slate-300 px-3 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
                     >
                       📷
@@ -420,7 +428,7 @@ export function FrameForm({
             onClick={() => (onCancel ? onCancel() : router.back())}
             className="btn-secondary"
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button type="submit" disabled={submitting} className="btn-primary">
             {submitting ? "Saving…" : submitLabel}
@@ -473,7 +481,7 @@ export function FrameForm({
           setScanOpen(false);
         }}
         title="Scan barcode"
-        description="Point the camera at the barcode to attach to this frame."
+        description="Use this device's camera or pair your phone with the QR code."
       />
     </>
   );

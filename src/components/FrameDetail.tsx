@@ -311,6 +311,12 @@ export function FrameDetail({ frame }: { frame: Frame }) {
             <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">
               {frame.inStock} in stock
             </span>
+            <Link
+              href={`/frames/new?copyFrom=${frame.id}`}
+              className="btn-secondary"
+            >
+              Add similar
+            </Link>
             <button
               type="button"
               onClick={() => setEditing((v) => !v)}
@@ -374,8 +380,8 @@ export function FrameDetail({ frame }: { frame: Frame }) {
               <button
                 type="button"
                 onClick={() => setScanOpen(true)}
-                title="Scan with camera"
-                aria-label="Scan with camera"
+                title="Scan barcode"
+                aria-label="Scan barcode"
                 className="border-l border-slate-300 px-2.5 py-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
               >
                 <span aria-hidden>📷</span>
@@ -510,7 +516,7 @@ export function FrameDetail({ frame }: { frame: Frame }) {
         open={scanOpen}
         onClose={() => setScanOpen(false)}
         title="Scan a new item for this frame"
-        description={`${frame.manufacturer} · ${frame.style}. The barcode is added as soon as it's detected.`}
+        description={`${frame.manufacturer} · ${frame.style}. Use this device's camera or pair your phone.`}
         onScanned={(b) => addItemByBarcode(b)}
       />
 

@@ -218,7 +218,7 @@ export function InventoryGrid() {
           <Link href="/frames/new" className="btn-primary">
             New Frame
           </Link>
-          <Link href="/scan?mode=pair" className="btn-secondary">
+          <Link href="/scan" className="btn-secondary">
             Scan
           </Link>
         </div>

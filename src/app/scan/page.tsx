@@ -15,7 +15,7 @@ type FrameLite = {
   manufacturer: string;
   style: string;
   color: string;
-  description: string;
+  description: string | null;
   cost: number;
   retailCost: number;
   size: string | null;
@@ -223,9 +223,8 @@ function ScanPageInner() {
           Scan barcode
         </h1>
         <p className="text-sm text-slate-500">
-          Scan to check out an item already in inventory, or to add a new
-          barcode. Pair your phone to scan while you work on this computer — or
-          use this device&apos;s camera.
+          Scan a barcode to sell a pair already in stock, or to receive a new
+          one into inventory. Pair your phone to scan from across the room.
         </p>
       </div>
 
@@ -284,7 +283,7 @@ function ScanPageInner() {
               {scannerOn ? "Pause camera" : "Start camera"}
             </button>
           </form>
-          {error ? (
+          {error && !lookup ? (
             <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
             </p>
@@ -296,7 +295,7 @@ function ScanPageInner() {
           {looking ? (
             <div className="mt-3 text-sm text-slate-500">Looking up scan…</div>
           ) : null}
-          {error ? (
+          {error && !lookup ? (
             <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
             </p>
@@ -312,6 +311,12 @@ function ScanPageInner() {
           <div className="font-mono text-sm text-slate-700">
             {lookup.barcode}
           </div>
+
+          {error ? (
+            <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          ) : null}
 
           {lookup.found && lookup.item ? (
             <KnownItem
@@ -329,6 +334,7 @@ function ScanPageInner() {
               setSelectedFrameId={setSelectedFrameId}
               onAttach={attachToFrame}
               onFrameCreated={onFrameCreatedFromScan}
+              onStartOver={reset}
               busy={busy}
             />
           )}
@@ -367,8 +373,9 @@ function KnownItem({
               {item.frame.manufacturer} · {item.frame.style}
             </div>
             <div className="text-sm text-slate-500">
-              {item.frame.color} · {item.frame.description}
-              {item.frame.size ? ` · ${item.frame.size}` : ""}
+              {[item.frame.color, item.frame.description, item.frame.size]
+                .filter(Boolean)
+                .join(" · ")}
             </div>
           </div>
           <span
@@ -446,6 +453,7 @@ function NewBarcode({
   setSelectedFrameId,
   onAttach,
   onFrameCreated,
+  onStartOver,
   busy,
 }: {
   barcode: string;
@@ -454,9 +462,10 @@ function NewBarcode({
   setSelectedFrameId: (v: string) => void;
   onAttach: (e: React.FormEvent) => void;
   onFrameCreated: () => void;
+  onStartOver: () => void;
   busy: boolean;
 }) {
-  const [mode, setMode] = useState<"attach" | "create">("create");
+  const [attachMode, setAttachMode] = useState(false);
 
   return (
     <div className="mt-4 space-y-4">
@@ -465,85 +474,67 @@ function NewBarcode({
           New barcode — add to inventory
         </div>
         <p className="mt-1 text-sm text-slate-600">
-          This barcode isn&apos;t in the system yet. Create a new frame below
-          (use “Mark as sold” if it&apos;s leaving the shop now), or attach it
-          to an existing frame.
+          Fill in the frame details below. Check “Mark as sold” if this pair is
+          leaving the shop now.
         </p>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="What do you want to do with this barcode?"
-        className="inline-flex rounded-lg bg-slate-100 p-1 text-sm"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "attach"}
-          onClick={() => setMode("attach")}
-          disabled={frames.length === 0}
-          title={
-            frames.length === 0
-              ? "No frames exist yet — create one below"
-              : undefined
-          }
-          className={
-            "rounded-md px-4 py-1.5 font-medium transition " +
-            (mode === "attach"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50")
-          }
-        >
-          Attach to existing frame
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "create"}
-          onClick={() => setMode("create")}
-          className={
-            "rounded-md px-4 py-1.5 font-medium transition " +
-            (mode === "create"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-700")
-          }
-        >
-          Create new frame
-        </button>
-      </div>
-
-      {mode === "attach" ? (
-        <form onSubmit={onAttach} className="space-y-4">
-          <div>
-            <label htmlFor="frame" className="label">
-              Attach to frame
-            </label>
-            <select
-              id="frame"
-              value={selectedFrameId}
-              onChange={(e) => setSelectedFrameId(e.target.value)}
-              className="input mt-1"
-            >
-              <option value="">Pick a frame…</option>
-              {frames.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.manufacturer} — {f.style} — {f.color} ({f.description})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <button type="submit" disabled={busy} className="btn-primary">
-              {busy ? "Attaching…" : "Attach barcode"}
-            </button>
-          </div>
-        </form>
+      {attachMode ? (
+        <div className="space-y-4">
+          <form onSubmit={onAttach} className="space-y-4">
+            <div>
+              <label htmlFor="frame" className="label">
+                Attach to existing frame
+              </label>
+              <select
+                id="frame"
+                value={selectedFrameId}
+                onChange={(e) => setSelectedFrameId(e.target.value)}
+                className="input mt-1"
+              >
+                <option value="">Pick a frame…</option>
+                {frames.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.manufacturer} — {f.style} — {f.color}
+                    {f.description ? ` (${f.description})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button type="submit" disabled={busy} className="btn-primary">
+                {busy ? "Attaching…" : "Attach barcode"}
+              </button>
+            </div>
+          </form>
+          <button
+            type="button"
+            onClick={() => setAttachMode(false)}
+            className="text-sm text-brand-600 hover:text-brand-800"
+          >
+            ← Create a new frame instead
+          </button>
+        </div>
       ) : (
-        <FrameForm
-          lockedBarcode={barcode}
-          submitLabel="Save frame"
-          onSaved={() => onFrameCreated()}
-        />
+        <div className="space-y-3">
+          <FrameForm
+            embedded
+            lockedBarcode={barcode}
+            submitLabel="Save frame"
+            cancelLabel="Start over"
+            onCancel={onStartOver}
+            onSaved={() => onFrameCreated()}
+          />
+          {frames.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setAttachMode(true)}
+              className="text-sm text-brand-600 hover:text-brand-800"
+            >
+              Already have this frame? Attach to existing instead
+            </button>
+          ) : null}
+        </div>
       )}
     </div>
   );

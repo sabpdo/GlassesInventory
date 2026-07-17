@@ -10,6 +10,7 @@ import {
   AdminAccessPanel,
   type AdminUserRow,
 } from "@/components/AdminAccessPanel";
+import { SalesExportPanel } from "@/components/SalesExportPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -133,6 +134,8 @@ export default async function AdminUsersPage() {
       </div>
 
       <AdminAccessPanel initialUsers={accessUsers} currentUserId={userId} />
+
+      <SalesExportPanel />
 
       <div className="card overflow-hidden">
         <div className="border-b border-slate-200 px-4 py-2">

@@ -7,20 +7,28 @@ barcode scanning.
 
 ## Features
 
-- Email + password login, plus Google sign-in (enabled when Google OAuth env vars are set)
-- Inventory grid sortable by **Vendor (Manufacturer)** or **Description**, with case-insensitive search
-- **Auto-refreshing** inventory grid (silently re-fetches every 5s while the tab is visible)
-- Columns in the order: Manufacturer, Style, Color, Description, Cost, Retail Cost, Size, Inventory Quantity
-- Add / edit / delete frames
-- Attach physical items (each with a unique barcode) to a frame
-- Scan a barcode on **this device** (camera or typed):
-  - Unknown → attach it to an existing frame or create a new one
-  - In stock → "Is this sold?" — marks sold, records timestamp + price, decreases inventory by 1
-  - Already sold → shows the sale info
-- **Pair phone** mode: open `/scan` on the computer, switch to "Pair phone", scan
-  the QR code with your phone — the phone becomes a remote scanner that pushes
-  barcodes to the computer's open page in real time. The phone doesn't have
-  to be logged in.
+- **Admin-only access** — public registration is disabled. The primary admin
+  account is bootstrapped from `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment.
+  Additional users are created on the **Team** page.
+- Email, username, or Google sign-in (Google only works for accounts the admin
+  has already created)
+- Inventory grid sortable by **Vendor (Manufacturer)** or **Description**, with
+  case-insensitive search, low-stock highlighting, and **auto-refresh** every 5s
+- Add / edit / delete frames; **Add similar** copies a frame’s vendor, style,
+  color, cost, retail, and size into a new frame (handy for new colors)
+- Attach physical items (each with a unique barcode) to a frame; edit, delete,
+  mark unsold, or update sold price per item
+- **Scan barcode** (`/scan`) — pair phone (default) or use this device’s camera:
+  - **Known barcode, in stock** → check out (mark as sold, optional price)
+  - **Known barcode, already sold** → sale info only
+  - **New barcode** → create a new frame (with optional mark-as-sold) or attach
+    to an existing frame
+- **Pair phone** anywhere you scan: the Scan page, or the 📷 button on barcode
+  fields (New frame, frame detail). Phone scans push barcodes to the computer
+  in real time. The phone page (`/p/[code]`) does not require login.
+- **Team** page (admins): manage users, view activity, **export sales CSV** by
+  date range
+- Profile page with personal sales stats
 
 ## Quick start
 
@@ -32,7 +40,8 @@ local dev so you don't trample prod.
 # 1. Copy the example env and fill in your Neon connection string
 cp .env.example .env
 # edit .env — paste your Neon POOLED URL into DATABASE_URL,
-# set NEXTAUTH_SECRET to `openssl rand -base64 32`, etc.
+# set NEXTAUTH_SECRET to `openssl rand -base64 32`,
+# set ADMIN_EMAIL and ADMIN_PASSWORD for the shop owner, etc.
 
 # 2. Install deps (this also runs `prisma generate`)
 npm install
@@ -45,113 +54,112 @@ npm run db:seed
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000 and sign in with your `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 
-The seed creates a default user you can log in with:
+The seed (optional) creates a demo user:
 
 - Email: `admin@example.com`
 - Password: `admin123`
 
 ### Google sign-in
 
-Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` and the **Continue with Google** button on `/login` starts working. (Add a redirect URI of `<your-domain>/api/auth/callback/google` in Google Cloud Console.)
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` and the **Continue
+with Google** button on `/login` starts working. (Add a redirect URI of
+`<your-domain>/api/auth/callback/google` in Google Cloud Console.) The Google
+account must match a user row the admin has already created.
+
+### Phone pairing URL
+
+If the desktop browser hostname differs from what phones should use (e.g. local
+dev vs production), set `NEXT_PUBLIC_APP_URL` to your public app URL so QR codes
+point at the right place.
 
 ### Useful scripts
 
-| Script | What it does |
-|---|---|
-| `npm run dev` | Next dev server on port 3000 |
-| `npm run build` | `prisma generate && next build` |
-| `npm run start` | Run the production build |
-| `npm run db:push` | Sync Prisma schema → database (no migration files) |
-| `npm run db:seed` | Run `prisma/seed.ts` |
-| `npm run db:studio` | Open Prisma Studio (a row-level GUI) |
+| Script              | What it does                                       |
+| ------------------- | -------------------------------------------------- |
+| `npm run dev`       | Next dev server on port 3000                       |
+| `npm run build`     | `prisma generate && prisma db push && next build`  |
+| `npm run start`     | Run the production build                           |
+| `npm run db:push`   | Sync Prisma schema → database (no migration files) |
+| `npm run db:seed`   | Run `prisma/seed.ts`                               |
+| `npm run db:studio` | Open Prisma Studio (a row-level GUI)               |
 
 ## Using the pair-phone scanner
 
-1. On your computer, sign in and open **Scan barcode** → switch the toggle to **Pair phone**.
+1. On your computer, sign in and open **Scan Barcode** (defaults to **Pair phone**).
 2. A QR code and a 6-character pair code appear. The code is good for 30 minutes.
-3. On your phone, point the phone camera at the QR (most camera apps will offer an "Open in browser" prompt) — or type the URL by hand (e.g. `https://your-domain.com/p/ABCDEF`).
-4. The phone page loads with no login required. Point at a barcode.
-5. Each scan pops up on your computer's Scan page within ~1.5 seconds. Finish the "Is this sold?" or "Attach to a frame" flow on the computer.
-6. Tap **Ready for next scan** on the computer when done — the phone is still paired and ready to send the next barcode.
+3. On your phone, scan the QR — or open the link (e.g. `https://your-domain.com/p/ABCDEF`).
+4. The phone page loads with no login required. Point at barcodes.
+5. Each scan appears on the computer within ~1 second. For checkout, mark sold;
+   for new inventory, fill in the frame form.
+6. Tap **Ready for next scan** when done — the phone stays paired.
 
-Pairing sessions auto-expire after 30 minutes so a forgotten phone link can't be used indefinitely.
+The same **Pair phone** tab is available in the 📷 scan dialog on New frame and
+frame detail barcode fields.
+
+Pairing sessions auto-expire after 30 minutes.
+
+## Sales export
+
+Admins: open **Team** → **Export sales (CSV)**. Pick a date range and download.
+The file includes sold date, frame details, barcode, sold price, and who marked
+it sold.
 
 ## Deploying to Vercel
 
 1. Push the repo to GitHub and import it on Vercel.
 2. In **Project Settings → Environment Variables** add:
-   - `DATABASE_URL` — your Neon **main** branch pooled URL (`…-pooler.<region>.aws.neon.tech/…?sslmode=require&channel_binding=require`)
-   - `NEXTAUTH_SECRET` — `openssl rand -base64 32` (different from your local one is fine)
+   - `DATABASE_URL` — your Neon **main** branch pooled URL
+   - `NEXTAUTH_SECRET` — `openssl rand -base64 32`
    - `NEXTAUTH_URL` — your deployed URL (e.g. `https://your-app.vercel.app`)
+   - `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` — primary shop admin
+   - (optional) `ADMIN_EMAILS` — comma-separated extra admin logins
+   - (optional) `NEXT_PUBLIC_APP_URL` — same as production URL for phone pairing
    - (optional) `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-3. Deploy. The build script runs `prisma generate && next build`, so the client is ready in the bundle.
-4. The first deploy will have an empty schema on the main branch (unless you've already pushed to it). Run once locally pointed at prod:
-
-   ```bash
-   DATABASE_URL="postgresql://…main…-pooler.…neon.tech/…?sslmode=require" npx prisma db push
-   # Optionally seed an initial admin user:
-   DATABASE_URL="postgresql://…main…-pooler.…neon.tech/…?sslmode=require" npm run db:seed
-   ```
+3. Deploy. The build script runs `prisma generate && prisma db push && next build`.
+4. Sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` on first deploy to bootstrap
+   the admin account.
 
 ### Neon tips
 
-- **Always use the pooled URL** for both local and prod. The pooled connection
-  multiplexes many client connections onto a small pool of Postgres backends
-  so serverless functions don't exhaust Postgres's connection limit. You can
-  spot it by the `-pooler` segment in the hostname.
-- **Branches are free copies of your DB.** Make a `dev` branch for local
-  development; reset it any time with `npm run db:push` after dropping all
-  tables in the Neon console. Make a `staging` branch if you want a place
-  to try migrations before pointing at prod.
-- **Neon cold starts** are a few hundred milliseconds — fine for an internal
-  app. Set Neon's "Always-on" if it ever feels noticeable.
-
-### Other database options (for context)
-
-- **Vercel Postgres** — same Neon under the hood, one-click setup from the Vercel dashboard. Smaller free tier than going direct.
-- **Supabase** — Postgres + storage + auth in one product. Useful if you'll later want photos of frames; use the port `6543` (transaction-pooled) URL.
-- **Railway / Render / Fly Postgres** — traditional always-on instances; ~$5/mo and up.
+- **Always use the pooled URL** for both local and prod (`-pooler` in the hostname).
+- **Branches are free copies of your DB.** Use a `dev` branch for local work.
+- **Neon cold starts** are a few hundred milliseconds — fine for an internal app.
 
 ## Project layout
 
 ```
 prisma/
   schema.prisma     # User, Frame, Item, PairingSession
-  seed.ts           # admin + sample frames
+  seed.ts           # optional demo data
 src/
   app/
     page.tsx                       # Inventory grid (/) — auto-refreshing
-    login/, register/              # auth pages
+    login/                         # auth (registration disabled)
     frames/new/, frames/[id]/      # create + detail/edit
-    scan/                          # "This device" + "Pair phone" tabs
+    scan/                          # Pair phone + This device
+    admin/users/                   # Team + sales export
     p/[code]/                      # public phone-scanner page
     api/
-      auth/[...nextauth]/          # NextAuth handler
-      register/                    # POST /api/register
-      frames/, frames/[id]/        # CRUD
-      items/                       # POST attach barcode
-      items/by-barcode/[barcode]/  # lookup
-      items/[id]/sell/             # mark sold
-      pair/                        # POST create pair session
-      pair/[code]/                 # GET poll
-      pair/[code]/scan/            # POST phone-side scan
+      auth/[...nextauth]/
+      admin/users/                 # user management
+      frames/, items/              # CRUD + barcode lookup + sell
+      sales/export/                # CSV export (admin)
+      pair/                        # phone pairing
   components/
-    Navbar.tsx
-    InventoryGrid.tsx
-    FrameForm.tsx
-    FrameDetail.tsx
-    BarcodeScanner.tsx
-    PairingPanel.tsx
+    FrameForm.tsx, FrameDetail.tsx, ScanModal.tsx, PairingPanel.tsx, …
   lib/
-    auth.ts, prisma.ts, utils.ts, pairing.ts
-  middleware.ts                    # NextAuth route protection (allows /p/* and /api/pair/*)
+    auth.ts, admin.ts, prisma.ts, csv.ts, …
+  middleware.ts                    # auth + admin route protection
 ```
 
 ## Notes
 
-- The camera scanner uses `@zxing/browser` and works in modern browsers that allow camera access (HTTPS or localhost). Typed barcode entry is always available as a fallback.
-- A "frame" represents a SKU (Manufacturer + Style + Color + Description). Each physical pair is an "item" with a unique barcode. Inventory quantity for a frame = number of its items where `status = "IN_STOCK"`.
-- Pairing codes use an unambiguous alphabet (no `0/O`, `1/I`, etc.) and expire after 30 minutes. Expired rows are best-effort cleaned up whenever a new code is created.
-- Search on Postgres uses `mode: "insensitive"` so case doesn't matter when searching by Manufacturer / Style / Color / Description.
+- The camera scanner uses `@zxing/browser` and works in browsers that allow
+  camera access (HTTPS or localhost). Typed barcode entry is always available.
+- A **frame** is a SKU (manufacturer + style + color + optional description).
+  Each physical pair is an **item** with a unique barcode. Inventory quantity =
+  items where `status = "IN_STOCK"`.
+- Pairing codes use an unambiguous alphabet and expire after 30 minutes.
+- Search uses case-insensitive matching on manufacturer, style, color, and description.

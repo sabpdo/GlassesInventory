@@ -16,5 +16,16 @@ export async function GET(_req: Request, { params }: RouteParams) {
   if (!item) {
     return NextResponse.json({ found: false, barcode });
   }
-  return NextResponse.json({ found: true, item });
+
+  const inStock = await prisma.item.count({
+    where: { frameId: item.frameId, status: "IN_STOCK" },
+  });
+
+  return NextResponse.json({
+    found: true,
+    item: {
+      ...item,
+      frame: { ...item.frame, inStock },
+    },
+  });
 }

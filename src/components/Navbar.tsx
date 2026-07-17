@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 const baseLinks = [
   { href: "/", label: "Inventory" },
-  { href: "/scan?mode=pair", label: "Scan Barcode" },
+  { href: "/scan", label: "Scan Barcode" },
   { href: "/frames/new", label: "New Frame" },
 ];
 
@@ -43,8 +43,9 @@ export function Navbar({
           </Link>
           <nav className="hidden gap-1 sm:flex">
             {links.map((l) => {
+              const path = l.href.split("?")[0];
               const active =
-                l.href === "/" ? pathname === "/" : pathname.startsWith(l.href);
+                path === "/" ? pathname === "/" : pathname.startsWith(path);
               return (
                 <Link
                   key={l.href}
