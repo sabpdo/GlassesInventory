@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { BarcodeScanner } from "@/components/BarcodeScanner";
 import { CurrencyInput } from "@/components/CurrencyInput";
 import { FrameForm } from "@/components/FrameForm";
@@ -39,9 +39,20 @@ type ItemLookup = {
 type Mode = "local" | "pair";
 
 export default function ScanPage() {
+  return (
+    <Suspense fallback={null}>
+      <ScanPageInner />
+    </Suspense>
+  );
+}
+
+function ScanPageInner() {
+  const searchParams = useSearchParams();
+  const initialMode = searchParams.get("mode") === "local" ? "local" : "pair";
+
   const router = useRouter();
   const toast = useToast();
-  const [mode, setMode] = useState<Mode>("local");
+  const [mode, setMode] = useState<Mode>(initialMode);
 
   const [barcode, setBarcode] = useState("");
   const [lookup, setLookup] = useState<ItemLookup | null>(null);
@@ -97,9 +108,10 @@ export default function ScanPage() {
   const handlePairScan = useCallback(
     (incoming: string) => {
       setBarcode(incoming);
+      toast.success(`Phone scan: ${incoming}`);
       runLookup(incoming);
     },
-    [runLookup]
+    [runLookup, toast]
   );
 
   async function loadFrames() {
@@ -237,24 +249,12 @@ export default function ScanPage() {
           Scan barcode
         </h1>
         <p className="text-sm text-slate-500">
-          Scan with this device&apos;s camera, or pair your phone to scan from
-          there while you work here.
+          Pair your phone to scan while you work on this computer — or use this
+          device&apos;s camera.
         </p>
       </div>
 
       <div className="inline-flex rounded-lg bg-slate-100 p-1 text-sm">
-        <button
-          type="button"
-          onClick={() => switchMode("local")}
-          className={
-            "rounded-md px-4 py-1.5 font-medium transition " +
-            (mode === "local"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-700")
-          }
-        >
-          This device
-        </button>
         <button
           type="button"
           onClick={() => switchMode("pair")}
@@ -266,6 +266,18 @@ export default function ScanPage() {
           }
         >
           Pair phone
+        </button>
+        <button
+          type="button"
+          onClick={() => switchMode("local")}
+          className={
+            "rounded-md px-4 py-1.5 font-medium transition " +
+            (mode === "local"
+              ? "bg-white text-slate-900 shadow-sm"
+              : "text-slate-500 hover:text-slate-700")
+          }
+        >
+          This device
         </button>
       </div>
 
@@ -471,9 +483,7 @@ function NewBarcode({
 }) {
   // Default mode: if we have existing frames offer "attach"; otherwise
   // jump straight to the new-frame form (no point in showing an empty picker).
-  const [mode, setMode] = useState<"attach" | "create">(
-    frames.length > 0 ? "attach" : "create"
-  );
+  const [mode, setMode] = useState<"attach" | "create">("create");
 
   return (
     <div className="mt-4 space-y-4">

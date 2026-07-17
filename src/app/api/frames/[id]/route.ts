@@ -7,7 +7,12 @@ const updateSchema = z.object({
   manufacturer: z.string().min(1),
   style: z.string().min(1),
   color: z.string().min(1),
-  description: z.string().min(1),
+  description: z
+    .string()
+    .trim()
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
   cost: z.coerce.number().nonnegative(),
   retailCost: z.coerce.number().nonnegative(),
   size: z.string().optional().nullable(),

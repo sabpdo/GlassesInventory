@@ -7,19 +7,28 @@ type Props = {
   onBarcode: (barcode: string) => void;
 };
 
-type Session = { code: string; expiresAt: string };
+type Session = {
+  code: string;
+  expiresAt: string;
+  pairUrl?: string;
+  appOrigin?: string;
+};
 
-// Generates a pair code and polls for incoming scans from the phone. When a
-// new scan arrives, hands it off to the parent (which runs it through the
-// same "Is this sold?" / "Attach to frame" UI as a local scan).
 export function PairingPanel({ enabled, onBarcode }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [pairUrl, setPairUrl] = useState<string | null>(null);
-  const cursorRef = useRef<string | null>(null);
+  const [appOrigin, setAppOrigin] = useState<string | null>(null);
+  const [lastReceived, setLastReceived] = useState<string | null>(null);
+  const cursorRef = useRef<string>(new Date(0).toISOString());
   const sessionCodeRef = useRef<string | null>(null);
+  const onBarcodeRef = useRef(onBarcode);
+
+  useEffect(() => {
+    onBarcodeRef.current = onBarcode;
+  }, [onBarcode]);
 
   useEffect(() => {
     sessionCodeRef.current = session?.code ?? null;
@@ -32,7 +41,7 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
         keepalive: true,
       });
     } catch {
-      // Best-effort — phone poll will eventually see expiry anyway.
+      // Best-effort
     }
   }, []);
 
@@ -40,7 +49,9 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
     setSession(null);
     setQrDataUrl(null);
     setPairUrl(null);
-    cursorRef.current = null;
+    setAppOrigin(null);
+    setLastReceived(null);
+    cursorRef.current = new Date(0).toISOString();
     sessionCodeRef.current = null;
   }, []);
 
@@ -59,7 +70,6 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
     if (existing) await closeSession(existing);
 
     clearLocal();
-    cursorRef.current = new Date().toISOString();
     try {
       const res = await fetch("/api/pair", { method: "POST" });
       if (!res.ok) throw new Error("Could not create pair code");
@@ -67,7 +77,9 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
       setSession(data);
       sessionCodeRef.current = data.code;
 
-      const url = `${window.location.origin}/p/${data.code}`;
+      const origin = data.appOrigin ?? window.location.origin;
+      setAppOrigin(origin);
+      const url = data.pairUrl ?? `${origin}/p/${data.code}`;
       setPairUrl(url);
 
       const { default: QRCode } = await import("qrcode");
@@ -84,15 +96,12 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
     }
   }
 
-  // Auto-create a session when the user switches to this tab.
   useEffect(() => {
     if (enabled && !session && !creating) {
       createSession();
     }
   }, [enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When the user leaves "Pair phone" mode, end the session on the server
-  // so the phone page stops too.
   useEffect(() => {
     if (enabled) return;
     const code = sessionCodeRef.current;
@@ -101,7 +110,6 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
     clearLocal();
   }, [enabled, clearLocal, closeSession]);
 
-  // Close the session when this panel unmounts (navigate away, etc.).
   useEffect(() => {
     return () => {
       const code = sessionCodeRef.current;
@@ -114,18 +122,17 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
     };
   }, []);
 
-  // Poll for scans from the phone.
   useEffect(() => {
-    if (!enabled || !session) return;
+    if (!enabled || !session?.code) return;
+    const code = session.code;
     let stopped = false;
 
     async function tick() {
       if (stopped) return;
       try {
-        const since = cursorRef.current ?? new Date(0).toISOString();
-        if (!session) return;
+        const since = cursorRef.current;
         const res = await fetch(
-          `/api/pair/${session.code}?since=${encodeURIComponent(since)}`,
+          `/api/pair/${encodeURIComponent(code)}?since=${encodeURIComponent(since)}`,
           { cache: "no-store" }
         );
         if (res.status === 410 || res.status === 404) {
@@ -137,27 +144,50 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
           const data = await res.json();
           if (data.lastBarcode && data.lastBarcodeAt) {
             cursorRef.current = data.lastBarcodeAt;
-            onBarcode(data.lastBarcode);
+            setLastReceived(data.lastBarcode);
+            onBarcodeRef.current(data.lastBarcode);
           }
         }
       } catch {
-        // network blip; just keep going
+        // network blip
       } finally {
-        if (!stopped) timer = window.setTimeout(tick, 1500);
+        if (!stopped) timer = window.setTimeout(tick, 800);
       }
     }
 
-    let timer = window.setTimeout(tick, 500);
+    let timer = window.setTimeout(tick, 300);
     return () => {
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, [enabled, session, onBarcode, clearLocal]);
+  }, [enabled, session?.code, clearLocal]);
 
   if (!enabled) return null;
 
+  const originMismatch =
+    appOrigin != null && appOrigin !== window.location.origin;
+
   return (
     <div className="space-y-4">
+      {originMismatch ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p className="font-semibold">Phone scans won&apos;t show up here</p>
+          <p className="mt-1">
+            This computer is on{" "}
+            <span className="font-mono text-xs">{window.location.origin}</span>,
+            but the QR code sends your phone to{" "}
+            <span className="font-mono text-xs">{appOrigin}</span>. Both devices
+            must use the same site.
+          </p>
+          <a
+            href={`${appOrigin}/scan?mode=pair`}
+            className="btn-primary mt-3 inline-flex text-sm"
+          >
+            Open scan page on {appOrigin.replace(/^https?:\/\//, "")}
+          </a>
+        </div>
+      ) : null}
+
       {error ? (
         <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
@@ -200,24 +230,22 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
               <ol className="mt-4 space-y-2 text-sm text-slate-600">
                 <li>
                   <span className="font-medium text-slate-900">1.</span> On your
-                  phone, scan the QR code, or open{" "}
-                  {pairUrl ? (
-                    <span className="font-mono text-xs text-slate-500">
-                      {pairUrl}
-                    </span>
-                  ) : null}
-                  .
+                  phone, scan the QR code or open the link below.
                 </li>
                 <li>
-                  <span className="font-medium text-slate-900">2.</span> The
-                  phone page works without logging in — point and scan.
+                  <span className="font-medium text-slate-900">2.</span> Scan
+                  barcodes on the phone — results appear on this computer.
                 </li>
                 <li>
-                  <span className="font-medium text-slate-900">3.</span> Each
-                  scan pops up below — finish the &quot;Is this sold?&quot; flow
-                  on this computer.
+                  <span className="font-medium text-slate-900">3.</span> Finish
+                  each scan below (sold? attach to frame?).
                 </li>
               </ol>
+              {pairUrl ? (
+                <p className="mt-3 break-all font-mono text-xs text-slate-500">
+                  {pairUrl}
+                </p>
+              ) : null}
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -232,7 +260,7 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
                     onClick={() => navigator.clipboard?.writeText(pairUrl)}
                     className="btn-secondary"
                   >
-                    Copy link
+                    Copy phone link
                   </button>
                 ) : null}
                 <button
@@ -243,11 +271,18 @@ export function PairingPanel({ enabled, onBarcode }: Props) {
                   End pairing
                 </button>
               </div>
-              <div className="mt-3 text-xs text-slate-400">
-                Expires{" "}
-                {new Date(session.expiresAt).toLocaleTimeString()}
-                {" · "}
-                End pairing closes the phone scanner too.
+              {lastReceived ? (
+                <p className="mt-3 text-xs text-emerald-700">
+                  Last scan received:{" "}
+                  <span className="font-mono">{lastReceived}</span>
+                </p>
+              ) : (
+                <p className="mt-3 text-xs text-slate-400">
+                  Waiting for phone scan…
+                </p>
+              )}
+              <div className="mt-2 text-xs text-slate-400">
+                Expires {new Date(session.expiresAt).toLocaleTimeString()}
               </div>
             </div>
           </div>

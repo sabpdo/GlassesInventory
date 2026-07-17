@@ -35,7 +35,7 @@ model Frame {
   manufacturer String   // a.k.a. Vendor
   style        String
   color        String
-  description  String   // a.k.a. Model Style Number
+  description  String?  // a.k.a. Model Style Number (optional)
   cost         Float    @default(0)
   retailCost   Float    @default(0)
   size         String?  // optional

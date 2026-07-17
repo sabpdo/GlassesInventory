@@ -1,3 +1,8 @@
+export function formatDescription(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed || "—";
+}
+
 export function formatCurrency(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "—";
   return new Intl.NumberFormat("en-US", {

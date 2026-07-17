@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Combobox } from "@/components/Combobox";
 import { CurrencyInput } from "@/components/CurrencyInput";
 import { Modal } from "@/components/Modal";
+import { COLOR_SUGGESTIONS } from "@/lib/colors";
 import { useToast } from "@/components/Toast";
 
 export type FrameFormValues = {
@@ -16,6 +17,10 @@ export type FrameFormValues = {
   retailCost: string;
   size: string;
   notes: string;
+  quantity: string;
+  barcode: string;
+  markSold: boolean;
+  soldPrice: string;
 };
 
 const empty: FrameFormValues = {
@@ -27,6 +32,10 @@ const empty: FrameFormValues = {
   retailCost: "",
   size: "",
   notes: "",
+  quantity: "1",
+  barcode: "",
+  markSold: false,
+  soldPrice: "",
 };
 
 export function FrameForm({
@@ -40,13 +49,19 @@ export function FrameForm({
   frameId?: string;
   submitLabel?: string;
   onSaved?: (frameId: string) => void;
-  // When provided, replaces the default "router.back()" Cancel behavior.
-  // Useful when the form is embedded inside another page (e.g. scan flow).
   onCancel?: () => void;
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [values, setValues] = useState<FrameFormValues>({ ...empty, ...initial });
+  const isCreate = !frameId;
+  const [values, setValues] = useState<FrameFormValues>({
+    ...empty,
+    ...initial,
+    quantity: initial?.quantity ?? (frameId ? "" : "1"),
+    barcode: initial?.barcode ?? "",
+    markSold: initial?.markSold ?? false,
+    soldPrice: initial?.soldPrice ?? "",
+  });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [lossWarningOpen, setLossWarningOpen] = useState(false);
@@ -62,29 +77,42 @@ export function FrameForm({
     })
       .then((res) => (res.ok ? res.json() : []))
       .then((data: string[]) => setManufacturerSuggestions(data))
-      .catch(() => {
-        // non-fatal — autocomplete just won't have suggestions
-      });
+      .catch(() => {});
     return () => controller.abort();
   }, []);
 
-  function update<K extends keyof FrameFormValues>(key: K, v: string) {
+  function update<K extends keyof FrameFormValues>(
+    key: K,
+    v: FrameFormValues[K]
+  ) {
     setValues((prev) => ({ ...prev, [key]: v }));
   }
 
   async function saveFrame() {
     setSubmitting(true);
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       manufacturer: values.manufacturer.trim(),
       style: values.style.trim(),
       color: values.color.trim(),
-      description: values.description.trim(),
+      description: values.description.trim() || null,
       cost: Number(values.cost || 0),
       retailCost: Number(values.retailCost || 0),
       size: values.size.trim() || null,
       notes: values.notes.trim() || null,
     };
+
+    if (isCreate) {
+      const barcode = values.barcode.trim();
+      const qtyRaw = values.quantity.trim();
+      const quantity = qtyRaw === "" ? 0 : Number(qtyRaw);
+      payload.barcode = barcode || null;
+      payload.quantity = barcode ? 0 : quantity;
+      payload.markSold = values.markSold;
+      if (values.markSold && values.soldPrice.trim()) {
+        payload.soldPrice = Number(values.soldPrice);
+      }
+    }
 
     const url = frameId ? `/api/frames/${frameId}` : "/api/frames";
     const method = frameId ? "PUT" : "POST";
@@ -114,7 +142,6 @@ export function FrameForm({
     e.preventDefault();
     setError(null);
 
-    // Client-side safety net (server still validates with zod).
     const cost = Number(values.cost || 0);
     const retail = Number(values.retailCost || 0);
     if (!Number.isFinite(cost) || cost < 0) {
@@ -125,6 +152,19 @@ export function FrameForm({
       setError("Retail cost must be a positive number.");
       return;
     }
+
+    if (isCreate) {
+      const barcode = values.barcode.trim();
+      const qtyRaw = values.quantity.trim();
+      if (!barcode && qtyRaw !== "") {
+        const quantity = Number(qtyRaw);
+        if (!Number.isInteger(quantity) || quantity < 0 || quantity > 100) {
+          setError("Quantity must be a whole number from 0 to 100.");
+          return;
+        }
+      }
+    }
+
     if (retail > 0 && cost > retail) {
       setLossWarningOpen(true);
       return;
@@ -133,115 +173,195 @@ export function FrameForm({
     await saveFrame();
   }
 
+  const hasInventory =
+    isCreate &&
+    (values.barcode.trim() !== "" ||
+      (values.quantity.trim() !== "" && Number(values.quantity) > 0) ||
+      values.markSold);
+
   return (
     <>
       <form onSubmit={onSubmit} className="card space-y-5 p-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div>
-          <label htmlFor="manufacturer" className="label">
-            Manufacturer (Vendor)
-            <span className="ml-0.5 text-red-500">*</span>
-          </label>
-          <div className="mt-1">
-            <Combobox
-              id="manufacturer"
-              value={values.manufacturer}
-              onChange={(v) => update("manufacturer", v)}
-              options={manufacturerSuggestions}
-              placeholder="Start typing a brand…"
-              required
-            />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="manufacturer" className="label">
+              Manufacturer (Vendor)
+              <span className="ml-0.5 text-red-500">*</span>
+            </label>
+            <div className="mt-1">
+              <Combobox
+                id="manufacturer"
+                value={values.manufacturer}
+                onChange={(v) => update("manufacturer", v)}
+                options={manufacturerSuggestions}
+                placeholder="Start typing a brand…"
+                required
+              />
+            </div>
           </div>
-          <p className="mt-1 text-xs text-slate-400">
-            Suggests common brands and any vendor you&apos;ve used before. You
-            can also type a new name.
+          <Field
+            id="style"
+            label="Style"
+            required
+            value={values.style}
+            onChange={(v) => update("style", v)}
+          />
+          <div>
+            <label htmlFor="color" className="label">
+              Color
+              <span className="ml-0.5 text-red-500">*</span>
+            </label>
+            <div className="mt-1">
+              <Combobox
+                id="color"
+                value={values.color}
+                onChange={(v) => update("color", v)}
+                options={COLOR_SUGGESTIONS}
+                placeholder="Black, Tortoise, Silver…"
+                required
+              />
+            </div>
+          </div>
+          <Field
+            id="description"
+            label="Description (optional)"
+            placeholder="Model / style number"
+            value={values.description}
+            onChange={(v) => update("description", v)}
+          />
+          <div>
+            <label htmlFor="cost" className="label">
+              Cost
+            </label>
+            <div className="mt-1">
+              <CurrencyInput
+                id="cost"
+                value={values.cost}
+                onChange={(v) => update("cost", v)}
+              />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="retailCost" className="label">
+              Retail Cost
+            </label>
+            <div className="mt-1">
+              <CurrencyInput
+                id="retailCost"
+                value={values.retailCost}
+                onChange={(v) => update("retailCost", v)}
+              />
+            </div>
+          </div>
+          <Field
+            id="size"
+            label="Size (optional)"
+            placeholder="e.g. 52-19-140"
+            value={values.size}
+            onChange={(v) => update("size", v)}
+          />
+        </div>
+
+        {isCreate ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <h3 className="text-sm font-semibold text-slate-900">
+              Initial inventory (optional)
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Most frames only need quantity 1. Leave both blank to add items
+              later from the frame page or Scan.
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field
+                id="quantity"
+                label="Quantity"
+                type="number"
+                inputMode="numeric"
+                placeholder="1"
+                value={values.barcode.trim() ? "" : values.quantity}
+                onChange={(v) => update("quantity", v)}
+                hint={
+                  values.barcode.trim()
+                    ? "Ignored when a barcode is set."
+                    : "How many pairs to add (no barcode)."
+                }
+                disabled={values.barcode.trim() !== ""}
+              />
+              <Field
+                id="barcode"
+                label="Barcode (optional)"
+                placeholder="Scan or type one barcode"
+                value={values.barcode}
+                onChange={(v) => update("barcode", v)}
+                hint="Adds exactly one item with this barcode."
+              />
+            </div>
+            <label className="mt-4 flex cursor-pointer items-start gap-2">
+              <input
+                type="checkbox"
+                checked={values.markSold}
+                onChange={(e) => update("markSold", e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              />
+              <span className="text-sm text-slate-700">
+                <span className="font-medium">Mark first item as sold</span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  {hasInventory
+                    ? "The first item created will be marked sold."
+                    : "Creates one item and marks it sold."}
+                </span>
+              </span>
+            </label>
+            {values.markSold ? (
+              <div className="mt-3 max-w-xs">
+                <label htmlFor="soldPrice" className="label">
+                  Sold price (optional)
+                </label>
+                <div className="mt-1">
+                  <CurrencyInput
+                    id="soldPrice"
+                    value={values.soldPrice}
+                    onChange={(v) => update("soldPrice", v)}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div>
+          <label htmlFor="notes" className="label">
+            Notes (optional)
+          </label>
+          <textarea
+            id="notes"
+            rows={3}
+            value={values.notes}
+            onChange={(e) => update("notes", e.target.value)}
+            className="input mt-1"
+          />
+        </div>
+
+        {error ? (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
           </p>
-        </div>
-        <Field
-          id="style"
-          label="Style"
-          required
-          value={values.style}
-          onChange={(v) => update("style", v)}
-        />
-        <Field
-          id="color"
-          label="Color"
-          required
-          value={values.color}
-          onChange={(v) => update("color", v)}
-        />
-        <Field
-          id="description"
-          label="Description (Model / Style Number)"
-          required
-          value={values.description}
-          onChange={(v) => update("description", v)}
-        />
-        <div>
-          <label htmlFor="cost" className="label">
-            Cost
-          </label>
-          <div className="mt-1">
-            <CurrencyInput
-              id="cost"
-              value={values.cost}
-              onChange={(v) => update("cost", v)}
-            />
-          </div>
-        </div>
-        <div>
-          <label htmlFor="retailCost" className="label">
-            Retail Cost
-          </label>
-          <div className="mt-1">
-            <CurrencyInput
-              id="retailCost"
-              value={values.retailCost}
-              onChange={(v) => update("retailCost", v)}
-            />
-          </div>
-        </div>
-        <Field
-          id="size"
-          label="Size (optional)"
-          placeholder="e.g. 52-19-140"
-          value={values.size}
-          onChange={(v) => update("size", v)}
-        />
-      </div>
-      <div>
-        <label htmlFor="notes" className="label">
-          Notes (optional)
-        </label>
-        <textarea
-          id="notes"
-          rows={3}
-          value={values.notes}
-          onChange={(e) => update("notes", e.target.value)}
-          className="input mt-1"
-        />
-      </div>
+        ) : null}
 
-      {error ? (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="flex items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={() => (onCancel ? onCancel() : router.back())}
-          className="btn-secondary"
-        >
-          Cancel
-        </button>
-        <button type="submit" disabled={submitting} className="btn-primary">
-          {submitting ? "Saving…" : submitLabel}
-        </button>
-      </div>
-    </form>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => (onCancel ? onCancel() : router.back())}
+            className="btn-secondary"
+          >
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-primary">
+            {submitting ? "Saving…" : submitLabel}
+          </button>
+        </div>
+      </form>
 
       <Modal
         open={lossWarningOpen}
@@ -295,6 +415,7 @@ function Field({
   placeholder,
   list,
   hint,
+  disabled = false,
 }: {
   id: string;
   label: string;
@@ -307,6 +428,7 @@ function Field({
   placeholder?: string;
   list?: string;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
     <div>
@@ -324,8 +446,9 @@ function Field({
         step={step}
         placeholder={placeholder}
         list={list}
+        disabled={disabled}
         autoComplete={list ? "off" : undefined}
-        className="input mt-1"
+        className="input mt-1 disabled:bg-slate-100 disabled:text-slate-400"
       />
       {hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
     </div>

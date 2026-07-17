@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 const baseLinks = [
   { href: "/", label: "Inventory" },
-  { href: "/scan", label: "Scan Barcode" },
+  { href: "/scan?mode=pair", label: "Scan Barcode" },
   { href: "/frames/new", label: "New Frame" },
 ];
 
@@ -83,7 +83,8 @@ function UserMenu({
   useEffect(() => {
     if (!open) return;
     function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);

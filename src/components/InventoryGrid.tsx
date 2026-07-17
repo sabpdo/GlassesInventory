@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MultiSelect } from "@/components/MultiSelect";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDescription } from "@/lib/utils";
 
 const LOW_STOCK_THRESHOLD = 3;
 
@@ -13,7 +13,7 @@ type FrameRow = {
   manufacturer: string;
   style: string;
   color: string;
-  description: string;
+  description: string | null;
   cost: number;
   retailCost: number;
   size: string | null;
@@ -218,7 +218,7 @@ export function InventoryGrid() {
           <Link href="/frames/new" className="btn-primary">
             New Frame
           </Link>
-          <Link href="/scan" className="btn-secondary">
+          <Link href="/scan?mode=pair" className="btn-secondary">
             Scan
           </Link>
         </div>
@@ -336,13 +336,19 @@ export function InventoryGrid() {
             <tbody className="divide-y divide-slate-100 bg-white">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-slate-400">
+                  <td
+                    colSpan={9}
+                    className="px-4 py-10 text-center text-slate-400"
+                  >
                     Loading inventory…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-slate-400">
+                  <td
+                    colSpan={9}
+                    className="px-4 py-10 text-center text-slate-400"
+                  >
                     {filterActive ? (
                       <>
                         No in-stock frames match these filters.{" "}
@@ -355,7 +361,8 @@ export function InventoryGrid() {
                         </button>
                         {!showOutOfStock ? (
                           <>
-                            {" "}or{" "}
+                            {" "}
+                            or{" "}
                             <button
                               type="button"
                               onClick={() => setShowOutOfStock(true)}
@@ -423,30 +430,34 @@ export function InventoryGrid() {
                       </td>
                       <td className="px-4 py-3 text-slate-700">{r.style}</td>
                       <td className="px-4 py-3 text-slate-700">{r.color}</td>
-                      <td className="px-4 py-3 text-slate-700">{r.description}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {formatDescription(r.description)}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700 tabular-nums">
                         {formatCurrency(r.cost)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700 tabular-nums">
                         {formatCurrency(r.retailCost)}
                       </td>
-                      <td className="px-4 py-3 text-slate-700">{r.size ?? "—"}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {r.size ?? "—"}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
                         <span
                           title={
                             r.inStock === 0
                               ? "Out of stock"
                               : r.inStock < LOW_STOCK_THRESHOLD
-                              ? "Low stock — consider reordering"
-                              : `${r.inStock} in stock`
+                                ? "Low stock — consider reordering"
+                                : `${r.inStock} in stock`
                           }
                           className={
                             "inline-flex min-w-[2.5rem] justify-center rounded-full px-2 py-0.5 text-xs font-semibold " +
                             (r.inStock === 0
                               ? "bg-slate-100 text-slate-500"
                               : r.inStock < LOW_STOCK_THRESHOLD
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-emerald-100 text-emerald-700")
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-emerald-100 text-emerald-700")
                           }
                         >
                           {r.inStock}

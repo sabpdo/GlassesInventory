@@ -8,7 +8,7 @@ import { FrameForm, type FrameFormValues } from "@/components/FrameForm";
 import { Modal } from "@/components/Modal";
 import { ScanModal } from "@/components/ScanModal";
 import { useToast } from "@/components/Toast";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDescription } from "@/lib/utils";
 
 type Item = {
   id: string;
@@ -26,7 +26,7 @@ type Frame = {
   manufacturer: string;
   style: string;
   color: string;
-  description: string;
+  description: string | null;
   cost: number;
   retailCost: number;
   size: string | null;
@@ -66,13 +66,15 @@ export function FrameDetail({ frame }: { frame: Frame }) {
     null
   );
 
-  const soldHistoryCount = frame.items.filter((i) => i.status === "SOLD").length;
+  const soldHistoryCount = frame.items.filter(
+    (i) => i.status === "SOLD"
+  ).length;
 
   const initial: Partial<FrameFormValues> = {
     manufacturer: frame.manufacturer,
     style: frame.style,
     color: frame.color,
-    description: frame.description,
+    description: frame.description ?? "",
     cost: String(frame.cost),
     retailCost: String(frame.retailCost),
     size: frame.size ?? "",
@@ -168,10 +170,10 @@ export function FrameDetail({ frame }: { frame: Frame }) {
       return;
     }
     const priceLabel =
-      soldPrice.trim() === "" ? "" : ` for ${formatCurrency(Number(soldPrice))}`;
-    toast.success(
-      `Sold ${frame.manufacturer} ${frame.style}${priceLabel}`
-    );
+      soldPrice.trim() === ""
+        ? ""
+        : ` for ${formatCurrency(Number(soldPrice))}`;
+    toast.success(`Sold ${frame.manufacturer} ${frame.style}${priceLabel}`);
     setSellItem(null);
     setSoldPrice("");
     router.refresh();
@@ -216,7 +218,8 @@ export function FrameDetail({ frame }: { frame: Frame }) {
               {frame.manufacturer} · {frame.style}
             </h1>
             <p className="text-sm text-slate-500">
-              {frame.color} · {frame.description}
+              {frame.color}
+              {frame.description ? ` · ${frame.description}` : null}
               {frame.size ? ` · ${frame.size}` : ""}
             </p>
           </div>
@@ -337,9 +340,7 @@ export function FrameDetail({ frame }: { frame: Frame }) {
               {frame.items.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-10 text-center">
-                    <div className="text-slate-400">
-                      No items yet.
-                    </div>
+                    <div className="text-slate-400">No items yet.</div>
                     <div className="mt-1 text-xs text-slate-400">
                       Scan a barcode, type one above, or add without a barcode.
                     </div>
@@ -465,8 +466,8 @@ export function FrameDetail({ frame }: { frame: Frame }) {
             autoFocus
           />
           <p className="mt-2 text-xs text-slate-400">
-            Up to 100 at a time. You can mark them sold individually later
-            from the items list below.
+            Up to 100 at a time. You can mark them sold individually later from
+            the items list below.
           </p>
           {noBarcodeError ? (
             <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -550,7 +551,7 @@ export function FrameDetail({ frame }: { frame: Frame }) {
             ? "Wait — this frame has sales history"
             : "Delete this frame?"
         }
-        description={`${frame.manufacturer} · ${frame.style} (${frame.description})`}
+        description={`${frame.manufacturer} · ${frame.style}${frame.description ? ` (${frame.description})` : ""}`}
         size="sm"
         footer={
           <>
@@ -575,10 +576,10 @@ export function FrameDetail({ frame }: { frame: Frame }) {
               {deleting
                 ? "Deleting…"
                 : forceDelete
-                ? `Yes, erase ${forceDelete.soldCount} sold item${
-                    forceDelete.soldCount === 1 ? "" : "s"
-                  }`
-                : "Delete frame"}
+                  ? `Yes, erase ${forceDelete.soldCount} sold item${
+                      forceDelete.soldCount === 1 ? "" : "s"
+                    }`
+                  : "Delete frame"}
             </button>
           </>
         }
