@@ -4,21 +4,38 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  const email = "admin@example.com";
-  const password = "admin123";
+  const login = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD?.trim();
+  const name = process.env.ADMIN_NAME?.trim() || "Admin";
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (!existing) {
-    await prisma.user.create({
-      data: {
-        email,
-        name: "Admin",
-        password: await bcrypt.hash(password, 10),
-      },
+  if (login && password) {
+    const isEmail = login.includes("@");
+    const existing = await prisma.user.findFirst({
+      where: isEmail ? { email: login } : { username: login },
     });
-    console.log(`Created default user: ${email} / ${password}`);
+
+    const hash = await bcrypt.hash(password, 10);
+    if (existing) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { password: hash, name, active: true, isAdmin: true },
+      });
+    } else {
+      await prisma.user.create({
+        data: {
+          ...(isEmail ? { email: login } : { username: login }),
+          name,
+          password: hash,
+          active: true,
+          isAdmin: true,
+        },
+      });
+    }
+    console.log(`Admin user ready: ${login}`);
   } else {
-    console.log(`Default user already exists: ${email}`);
+    console.log(
+      "Skipping admin user — set ADMIN_EMAIL and ADMIN_PASSWORD in .env to seed one."
+    );
   }
 
   const sampleFrames = [
@@ -57,7 +74,6 @@ async function main() {
     });
     if (!existingFrame) {
       const frame = await prisma.frame.create({ data: f });
-      // Seed a couple of in-stock items per frame.
       await prisma.item.createMany({
         data: [
           { barcode: `DEMO-${frame.id}-001`, frameId: frame.id },

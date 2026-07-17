@@ -13,10 +13,13 @@ datasource db {
 
 model User {
   id        String   @id @default(cuid())
-  email     String   @unique
+  email     String?  @unique // optional; used for Google sign-in
+  username  String?  @unique // optional; sign in with email or username
   name      String?
   password  String?  // null for OAuth-only accounts
   image     String?
+  active    Boolean  @default(true) // false = revoked; cannot sign in
+  isAdmin   Boolean  @default(false) // can manage team and see admin pages
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

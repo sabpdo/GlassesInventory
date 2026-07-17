@@ -3,13 +3,12 @@
 import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 
 function LoginForm() {
   const params = useSearchParams();
   const callbackUrl = params.get("callbackUrl") || "/";
 
-  const [email, setEmail] = useState("");
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -25,14 +24,14 @@ function LoginForm() {
     setError(null);
     setSubmitting(true);
     const res = await signIn("credentials", {
-      email,
+      login,
       password,
       redirect: false,
       callbackUrl,
     });
     setSubmitting(false);
     if (res?.error) {
-      setError("Invalid email or password.");
+      setError("Invalid email/username or password.");
       return;
     }
     // Full page load so the session cookie is definitely sent on the next
@@ -50,16 +49,16 @@ function LoginForm() {
 
         <form className="mt-6 space-y-4" onSubmit={onSubmit}>
           <div>
-            <label htmlFor="email" className="label">
-              Email
+            <label htmlFor="login" className="label">
+              Email or username
             </label>
             <input
-              id="email"
-              type="email"
-              autoComplete="email"
+              id="login"
+              type="text"
+              autoComplete="username"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
               className="input mt-1"
             />
           </div>
@@ -111,12 +110,10 @@ function LoginForm() {
           </>
         ) : null}
 
-        <div className="mt-6 border-t border-slate-200 pt-5 text-center">
-          <p className="text-sm text-slate-600">Don&apos;t have an account?</p>
-          <Link href="/register" className="btn-secondary mt-2 w-full">
-            Create an account
-          </Link>
-        </div>
+        <p className="mt-6 border-t border-slate-200 pt-5 text-center text-sm text-slate-500">
+          Need an account? Contact your administrator — self-registration is
+          disabled.
+        </p>
       </div>
     </div>
   );

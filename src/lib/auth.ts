@@ -3,29 +3,43 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { isAdminEmail } from "@/lib/admin";
+import {
+  ensureAdminUser,
+  isAdminLogin,
+  isUserAdmin,
+  syncEnvAdminFlag,
+} from "@/lib/admin";
+import { findUserByLogin, getUserLogin, normalizeLogin } from "@/lib/users";
 
 const providers: NextAuthOptions["providers"] = [
   CredentialsProvider({
-    name: "Email & Password",
+    name: "Email or username & Password",
     credentials: {
-      email: { label: "Email", type: "email" },
+      login: { label: "Email or username", type: "text" },
       password: { label: "Password", type: "password" },
     },
     async authorize(credentials) {
-      if (!credentials?.email || !credentials?.password) return null;
+      if (!credentials?.login || !credentials?.password) return null;
 
-      const user = await prisma.user.findUnique({
-        where: { email: credentials.email.toLowerCase() },
-      });
-      if (!user || !user.password) return null;
+      const login = normalizeLogin(credentials.login);
+
+      if (isAdminLogin(login)) {
+        await ensureAdminUser();
+      }
+
+      const user = await findUserByLogin(login);
+      if (!user || !user.password || !user.active) return null;
 
       const ok = await bcrypt.compare(credentials.password, user.password);
       if (!ok) return null;
 
+      if (isAdminLogin(login)) {
+        await syncEnvAdminFlag(user.id, login);
+      }
+
       return {
         id: user.id,
-        email: user.email,
+        email: getUserLogin(user),
         name: user.name ?? undefined,
         image: user.image ?? undefined,
       };
@@ -33,8 +47,7 @@ const providers: NextAuthOptions["providers"] = [
   }),
 ];
 
-// Add Google provider only when credentials are configured. This makes it
-// trivial to flip on later without code changes.
+// Google only works for accounts the admin has already created.
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   providers.push(
     GoogleProvider({
@@ -48,48 +61,46 @@ export const authOptions: NextAuthOptions = {
   providers,
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
-  // Required on Vercel so callbacks/cookies use the deployed host, not localhost.
-  ...(process.env.NODE_ENV === "production"
-    ? { trustHost: true }
-    : {}),
+  ...(process.env.NODE_ENV === "production" ? { trustHost: true } : {}),
   callbacks: {
     async signIn({ user, account }) {
-      // Auto-provision a local user row for Google sign-ins so we have a
-      // single source of truth for "who can use this app".
       if (account?.provider === "google" && user.email) {
-        await prisma.user.upsert({
-          where: { email: user.email.toLowerCase() },
-          update: { name: user.name ?? undefined, image: user.image ?? undefined },
-          create: {
-            email: user.email.toLowerCase(),
+        const lower = user.email.toLowerCase();
+
+        if (isAdminLogin(lower)) {
+          await ensureAdminUser();
+        }
+
+        const existing = await prisma.user.findUnique({
+          where: { email: lower },
+        });
+        // No self-registration: Google sign-in only for whitelisted users.
+        if (!existing || !existing.active) return false;
+
+        await prisma.user.update({
+          where: { email: lower },
+          data: {
             name: user.name ?? undefined,
             image: user.image ?? undefined,
           },
         });
+        if (existing.id) {
+          await syncEnvAdminFlag(existing.id, lower);
+        }
       }
       return true;
     },
     async jwt({ token, user }) {
-      // Always resolve to *our* DB user id, not the provider's id, and
-      // re-resolve on every request so a stale or wrong id (e.g. a Google
-      // `sub` left over from an older sign-in) can't get stuck in the JWT
-      // and cause foreign-key failures when we write soldById / createdById.
-      const email = (user?.email ?? token.email) as string | undefined;
-      if (email) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: email.toLowerCase() },
-          select: { id: true },
-        });
-        if (dbUser) {
+      const login = (user?.email ?? token.email) as string | undefined;
+      if (login) {
+        const dbUser = await findUserByLogin(login);
+        if (dbUser?.active) {
           token.userId = dbUser.id;
+          (token as { isAdmin?: boolean }).isAdmin = isUserAdmin(dbUser);
         } else {
-          // The user row was deleted — wipe the claim so requireUser()
-          // sees them as unauthenticated.
           delete (token as { userId?: string }).userId;
+          (token as { isAdmin?: boolean }).isAdmin = false;
         }
-        // Re-check admin status every request so toggling ADMIN_EMAILS in
-        // env takes effect on the next page load (no re-login required).
-        (token as { isAdmin?: boolean }).isAdmin = isAdminEmail(email);
       }
       return token;
     },

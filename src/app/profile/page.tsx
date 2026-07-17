@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminEmail } from "@/lib/admin";
+import { isUserAdmin } from "@/lib/admin";
+import { getUserDisplayName, getUserInitials, getUserLogin } from "@/lib/users";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -41,8 +42,9 @@ export default async function ProfilePage() {
 
   if (!user) redirect("/login");
 
-  const displayName = user.name?.trim() || user.email.split("@")[0];
-  const initials = getInitials(user.name ?? undefined, user.email);
+  const displayName = getUserDisplayName(user);
+  const initials = getUserInitials(user);
+  const login = getUserLogin(user);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -65,7 +67,7 @@ export default async function ProfilePage() {
             <div className="text-lg font-semibold text-slate-900">
               {displayName}
             </div>
-            {isAdminEmail(user.email) ? (
+            {isUserAdmin(user) ? (
               <span
                 title="You're an admin — you can see Team activity from the navbar"
                 className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700"
@@ -74,12 +76,12 @@ export default async function ProfilePage() {
               </span>
             ) : null}
           </div>
-          <div className="text-sm text-slate-500">{user.email}</div>
+          <div className="text-sm text-slate-500">{login}</div>
           <div className="mt-1 text-xs text-slate-400">
             Member since {formatDate(user.createdAt)}
           </div>
         </div>
-        {isAdminEmail(user.email) ? (
+        {isUserAdmin(user) ? (
           <Link href="/admin/users" className="btn-secondary">
             Team activity →
           </Link>
@@ -92,11 +94,7 @@ export default async function ProfilePage() {
           value={String(framesCreated)}
           accent="brand"
         />
-        <Stat
-          label="Items added"
-          value={String(itemsCreated)}
-          accent="brand"
-        />
+        <Stat label="Items added" value={String(itemsCreated)} accent="brand" />
         <Stat
           label="Items sold"
           value={String(soldStats._count._all)}
@@ -134,7 +132,10 @@ export default async function ProfilePage() {
             <tbody className="divide-y divide-slate-100 bg-white">
               {recentSold.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                  <td
+                    colSpan={5}
+                    className="px-4 py-8 text-center text-slate-400"
+                  >
                     No sales yet. Scanned sales show up here.
                   </td>
                 </tr>
@@ -210,9 +211,7 @@ function Stat({
           {value}
         </span>
       </div>
-      {sub ? (
-        <div className="mt-1 text-xs text-slate-500">{sub}</div>
-      ) : null}
+      {sub ? <div className="mt-1 text-xs text-slate-500">{sub}</div> : null}
     </div>
   );
 }
@@ -221,12 +220,4 @@ function startOfToday(): Date {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
-}
-
-function getInitials(name?: string, email?: string): string {
-  const source = (name?.trim() || email?.split("@")[0] || "").trim();
-  if (!source) return "?";
-  const parts = source.split(/[\s.\-_]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return source.slice(0, 2).toUpperCase();
 }

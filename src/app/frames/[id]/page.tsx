@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { FrameDetail } from "@/components/FrameDetail";
+import { getUserDisplayName } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +16,8 @@ export default async function FramePage({
       items: {
         orderBy: { createdAt: "desc" },
         include: {
-          createdBy: { select: { name: true, email: true } },
-          soldBy: { select: { name: true, email: true } },
+          createdBy: { select: { name: true, email: true, username: true } },
+          soldBy: { select: { name: true, email: true, username: true } },
         },
       },
       _count: { select: { items: { where: { status: "IN_STOCK" } } } },
@@ -51,8 +52,11 @@ export default async function FramePage({
 }
 
 function displayUser(
-  u: { name: string | null; email: string } | null | undefined
+  u:
+    | { name: string | null; email: string | null; username: string | null }
+    | null
+    | undefined
 ): string | null {
   if (!u) return null;
-  return u.name?.trim() || u.email.split("@")[0];
+  return getUserDisplayName(u);
 }

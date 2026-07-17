@@ -22,3 +22,25 @@ export async function requireUser(): Promise<AuthCheck> {
   }
   return { ok: true, userId, email };
 }
+
+export async function requireAdmin(): Promise<AuthCheck> {
+  const session = await getServerSession(authOptions);
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  const email = session?.user?.email;
+  const isAdmin = Boolean(
+    (session?.user as { isAdmin?: boolean } | undefined)?.isAdmin
+  );
+  if (!userId || !email) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+  if (!isAdmin) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    };
+  }
+  return { ok: true, userId, email };
+}
