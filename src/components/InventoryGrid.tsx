@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MultiSelect } from "@/components/MultiSelect";
+import {
+  defaultSortDir,
+  type FrameSortField,
+  isFrameSortField,
+} from "@/lib/frame-sort";
 import { formatCurrency, formatDate, formatDescription } from "@/lib/utils";
 
 const LOW_STOCK_THRESHOLD = 3;
@@ -21,32 +26,31 @@ type FrameRow = {
   createdAt: string;
 };
 
-type SortField = "manufacturer" | "description" | "cost" | "createdAt";
 type SortDir = "asc" | "desc";
+
+function parseSort(param: string | null): FrameSortField {
+  if (param && isFrameSortField(param)) return param;
+  return "manufacturer";
+}
 
 export function InventoryGrid() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Initial state seeded from the URL so refresh/bookmark/share works.
-  const [sort, setSort] = useState<SortField>(() => {
-    const param = searchParams.get("sort");
-    if (
-      param === "description" ||
-      param === "cost" ||
-      param === "createdAt" ||
-      param === "manufacturer"
-    ) {
-      return param;
-    }
-    return "manufacturer";
-  });
-  const [dir, setDir] = useState<SortDir>(
-    (searchParams.get("dir") as SortDir) || "asc"
+  const [sort, setSort] = useState<FrameSortField>(() =>
+    parseSort(searchParams.get("sort"))
   );
+  const [dir, setDir] = useState<SortDir>(() => {
+    const param = searchParams.get("dir");
+    if (param === "asc" || param === "desc") return param;
+    return defaultSortDir(parseSort(searchParams.get("sort")));
+  });
   const [q, setQ] = useState(searchParams.get("q") || "");
   const [selectedManufacturers, setSelectedManufacturers] = useState<string[]>(
     searchParams.get("manufacturer")?.split(",").filter(Boolean) ?? []
+  );
+  const [selectedColors, setSelectedColors] = useState<string[]>(
+    searchParams.get("color")?.split(",").filter(Boolean) ?? []
   );
   const [descPrefix, setDescPrefix] = useState(searchParams.get("desc") || "");
   const [showOutOfStock, setShowOutOfStock] = useState(
@@ -57,28 +61,36 @@ export function InventoryGrid() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [manufacturers, setManufacturers] = useState<string[]>([]);
+  const [colors, setColors] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const filterActive =
     q.trim() !== "" ||
     selectedManufacturers.length > 0 ||
+    selectedColors.length > 0 ||
     descPrefix.trim() !== "";
 
-  // Build the query string used both for the API call and for the address bar.
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
     if (q.trim()) params.set("q", q.trim());
     if (selectedManufacturers.length)
       params.set("manufacturer", selectedManufacturers.join(","));
+    if (selectedColors.length) params.set("color", selectedColors.join(","));
     if (descPrefix.trim()) params.set("desc", descPrefix.trim());
     if (sort !== "manufacturer") params.set("sort", sort);
-    if (dir !== "asc") params.set("dir", dir);
+    if (dir !== defaultSortDir(sort)) params.set("dir", dir);
     if (showOutOfStock) params.set("out", "1");
     return params.toString();
-  }, [q, selectedManufacturers, descPrefix, sort, dir, showOutOfStock]);
+  }, [
+    q,
+    selectedManufacturers,
+    selectedColors,
+    descPrefix,
+    sort,
+    dir,
+    showOutOfStock,
+  ]);
 
-  // Mirror state into the URL bar (replace, so we don't blow up the back stack
-  // on every keystroke).
   useEffect(() => {
     const url = queryString ? `/?${queryString}` : "/";
     router.replace(url, { scroll: false });
@@ -110,32 +122,40 @@ export function InventoryGrid() {
       }
     }
 
-    async function loadManufacturers() {
+    async function loadFilterOptions() {
       try {
-        const res = await fetch("/api/frames/manufacturers", {
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        if (!res.ok) return;
-        const data: string[] = await res.json();
-        if (cancelled) return;
-        setManufacturers(data);
+        const [mRes, cRes] = await Promise.all([
+          fetch("/api/frames/manufacturers", {
+            signal: controller.signal,
+            cache: "no-store",
+          }),
+          fetch("/api/color-suggestions", {
+            signal: controller.signal,
+            cache: "no-store",
+          }),
+        ]);
+        if (mRes.ok) {
+          const data: string[] = await mRes.json();
+          if (!cancelled) setManufacturers(data);
+        }
+        if (cRes.ok) {
+          const data: string[] = await cRes.json();
+          if (!cancelled) setColors(data);
+        }
       } catch {
         // non-fatal
       }
     }
 
     loadRows(false);
-    loadManufacturers();
+    loadFilterOptions();
 
-    // Silent re-poll every 5s so phone-scanned changes show up without anyone
-    // tapping refresh. Only while the tab is visible.
     function schedule() {
       if (cancelled) return;
       timer = window.setTimeout(async () => {
         if (document.visibilityState === "visible") {
           await loadRows(true);
-          await loadManufacturers();
+          await loadFilterOptions();
         }
         schedule();
       }, 5000);
@@ -145,7 +165,7 @@ export function InventoryGrid() {
     function onVisibility() {
       if (document.visibilityState === "visible") {
         loadRows(true);
-        loadManufacturers();
+        loadFilterOptions();
       }
     }
     document.addEventListener("visibilitychange", onVisibility);
@@ -167,7 +187,6 @@ export function InventoryGrid() {
     return { frames, units, lowStock };
   }, [rows]);
 
-  // Press "/" to focus the search box (skip when already typing in a field).
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -182,18 +201,19 @@ export function InventoryGrid() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  function toggleSort(field: SortField) {
+  function toggleSort(field: FrameSortField) {
     if (sort === field) {
       setDir(dir === "asc" ? "desc" : "asc");
     } else {
       setSort(field);
-      setDir(field === "createdAt" ? "desc" : "asc");
+      setDir(defaultSortDir(field));
     }
   }
 
   function clearFilters() {
     setQ("");
     setSelectedManufacturers([]);
+    setSelectedColors([]);
     setDescPrefix("");
   }
 
@@ -253,6 +273,15 @@ export function InventoryGrid() {
           ariaLabel="Filter by manufacturer"
           width="w-56"
         />
+        <MultiSelect
+          options={colors}
+          selected={selectedColors}
+          onChange={setSelectedColors}
+          emptyLabel="All colors"
+          searchPlaceholder="Filter colors…"
+          ariaLabel="Filter by color"
+          width="w-48"
+        />
         <input
           type="text"
           placeholder="Description starts with…"
@@ -261,58 +290,6 @@ export function InventoryGrid() {
           className="input w-56"
           aria-label="Filter by description prefix"
         />
-        <div className="flex items-center gap-1 text-sm text-slate-500">
-          <span className="text-xs uppercase tracking-wide">Sort</span>
-          <button
-            type="button"
-            onClick={() => toggleSort("manufacturer")}
-            className={
-              "rounded-md px-2 py-1 text-sm font-medium " +
-              (sort === "manufacturer"
-                ? "bg-brand-50 text-brand-700"
-                : "text-slate-600 hover:bg-slate-100")
-            }
-          >
-            Vendor {sort === "manufacturer" ? (dir === "asc" ? "↑" : "↓") : ""}
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleSort("description")}
-            className={
-              "rounded-md px-2 py-1 text-sm font-medium " +
-              (sort === "description"
-                ? "bg-brand-50 text-brand-700"
-                : "text-slate-600 hover:bg-slate-100")
-            }
-          >
-            Description{" "}
-            {sort === "description" ? (dir === "asc" ? "↑" : "↓") : ""}
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleSort("cost")}
-            className={
-              "rounded-md px-2 py-1 text-sm font-medium " +
-              (sort === "cost"
-                ? "bg-brand-50 text-brand-700"
-                : "text-slate-600 hover:bg-slate-100")
-            }
-          >
-            Cost {sort === "cost" ? (dir === "asc" ? "↑" : "↓") : ""}
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleSort("createdAt")}
-            className={
-              "rounded-md px-2 py-1 text-sm font-medium " +
-              (sort === "createdAt"
-                ? "bg-brand-50 text-brand-700"
-                : "text-slate-600 hover:bg-slate-100")
-            }
-          >
-            Recent {sort === "createdAt" ? (dir === "asc" ? "↑" : "↓") : ""}
-          </button>
-        </div>
         <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm text-slate-600">
           <input
             type="checkbox"
@@ -351,8 +328,20 @@ export function InventoryGrid() {
                 >
                   Manufacturer
                 </Th>
-                <th className="px-4 py-3">Style</th>
-                <th className="px-4 py-3">Color</th>
+                <Th
+                  active={sort === "style"}
+                  dir={dir}
+                  onClick={() => toggleSort("style")}
+                >
+                  Style
+                </Th>
+                <Th
+                  active={sort === "color"}
+                  dir={dir}
+                  onClick={() => toggleSort("color")}
+                >
+                  Color
+                </Th>
                 <Th
                   active={sort === "description"}
                   dir={dir}
@@ -364,13 +353,33 @@ export function InventoryGrid() {
                   active={sort === "cost"}
                   dir={dir}
                   onClick={() => toggleSort("cost")}
-                  className="text-right"
+                  align="right"
                 >
                   Cost
                 </Th>
-                <th className="px-4 py-3 text-right">Retail</th>
-                <th className="px-4 py-3">Size</th>
-                <th className="px-4 py-3 text-right">In Stock</th>
+                <Th
+                  active={sort === "retailCost"}
+                  dir={dir}
+                  onClick={() => toggleSort("retailCost")}
+                  align="right"
+                >
+                  Retail
+                </Th>
+                <Th
+                  active={sort === "size"}
+                  dir={dir}
+                  onClick={() => toggleSort("size")}
+                >
+                  Size
+                </Th>
+                <Th
+                  active={sort === "inStock"}
+                  dir={dir}
+                  onClick={() => toggleSort("inStock")}
+                  align="right"
+                >
+                  In Stock
+                </Th>
                 <Th
                   active={sort === "createdAt"}
                   dir={dir}
@@ -539,22 +548,22 @@ function Th({
   dir,
   children,
   onClick,
-  className = "",
+  align = "left",
 }: {
   active: boolean;
   dir: SortDir;
   children: React.ReactNode;
   onClick: () => void;
-  className?: string;
+  align?: "left" | "right";
 }) {
   return (
-    <th className={"px-4 py-3 " + className}>
+    <th className={"px-4 py-3 " + (align === "right" ? "text-right" : "")}>
       <button
         type="button"
         onClick={onClick}
         className={
           "inline-flex w-full items-center gap-1 text-xs font-semibold uppercase tracking-wide " +
-          (className.includes("text-right") ? "justify-end " : "") +
+          (align === "right" ? "justify-end " : "") +
           (active ? "text-brand-700" : "text-slate-500 hover:text-slate-700")
         }
       >

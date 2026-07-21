@@ -6,6 +6,11 @@ import { requireUser } from "@/lib/session";
 import { resolveColor, resolveManufacturer } from "@/lib/resolve-labels";
 import { findMatchingFrame } from "@/lib/match-frame";
 import { addFrameInventory, InventoryError } from "@/lib/frame-inventory";
+import {
+  defaultSortDir,
+  type FrameSortField,
+  isFrameSortField,
+} from "@/lib/frame-sort";
 
 const frameSchema = z.object({
   manufacturer: z.string().min(1, "Manufacturer is required"),
@@ -32,20 +37,34 @@ const createFrameSchema = frameSchema.extend({
   addToExistingFrameId: z.string().optional(),
 });
 
-const SORT_FIELDS = [
-  "manufacturer",
-  "description",
-  "cost",
-  "createdAt",
-] as const;
-type SortField = (typeof SORT_FIELDS)[number];
-
-function isSortField(value: string): value is SortField {
-  return (SORT_FIELDS as readonly string[]).includes(value);
+function buildOrderBy(
+  sort: FrameSortField,
+  dir: "asc" | "desc"
+): Record<string, "asc" | "desc">[] {
+  switch (sort) {
+    case "style":
+      return [{ style: dir }, { manufacturer: "asc" }];
+    case "color":
+      return [{ color: dir }, { manufacturer: "asc" }];
+    case "description":
+      return [{ description: dir }, { manufacturer: "asc" }];
+    case "cost":
+      return [{ cost: dir }, { manufacturer: "asc" }];
+    case "retailCost":
+      return [{ retailCost: dir }, { manufacturer: "asc" }];
+    case "size":
+      return [{ size: dir }, { manufacturer: "asc" }];
+    case "createdAt":
+      return [{ createdAt: dir }];
+    case "inStock":
+      return [{ manufacturer: "asc" }];
+    default:
+      return [{ manufacturer: dir }, { style: "asc" }];
+  }
 }
 
 // GET /api/frames
-//   ?sort=manufacturer|description|cost|createdAt
+//   ?sort=manufacturer|style|color|description|cost|retailCost|size|inStock|createdAt
 //   &dir=asc|desc
 //   &q=foo                          full-text-ish search across all fields
 //   &manufacturer=Ray-Ban,Oakley    one or more (comma separated)
@@ -54,8 +73,11 @@ function isSortField(value: string): value is SortField {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const sortParam = searchParams.get("sort") ?? "manufacturer";
-  const sort: SortField = isSortField(sortParam) ? sortParam : "manufacturer";
-  const dir = (searchParams.get("dir") ?? "asc") as "asc" | "desc";
+  const sort: FrameSortField = isFrameSortField(sortParam)
+    ? sortParam
+    : "manufacturer";
+  const dir = (searchParams.get("dir") ?? defaultSortDir(sort)) as
+    "asc" | "desc";
   const q = searchParams.get("q")?.trim();
   const manufacturers =
     searchParams
@@ -63,17 +85,16 @@ export async function GET(req: Request) {
       ?.split(",")
       .map((s) => s.trim())
       .filter(Boolean) ?? [];
+  const colors =
+    searchParams
+      .get("color")
+      ?.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean) ?? [];
   const descPrefix = searchParams.get("desc")?.trim();
   const includeOutOfStock = searchParams.get("out") === "1";
 
-  const orderBy: Record<string, "asc" | "desc">[] =
-    sort === "description"
-      ? [{ description: dir }, { manufacturer: "asc" }]
-      : sort === "cost"
-        ? [{ cost: dir }, { manufacturer: "asc" }]
-        : sort === "createdAt"
-          ? [{ createdAt: dir }]
-          : [{ manufacturer: dir }, { description: "asc" }];
+  const orderBy = buildOrderBy(sort, dir);
 
   const conditions: Prisma.FrameWhereInput[] = [];
   if (!includeOutOfStock) {
@@ -82,6 +103,13 @@ export async function GET(req: Request) {
   }
   if (manufacturers.length > 0) {
     conditions.push({ manufacturer: { in: manufacturers } });
+  }
+  if (colors.length > 0) {
+    conditions.push({
+      OR: colors.map((color) => ({
+        color: { equals: color, mode: "insensitive" as const },
+      })),
+    });
   }
   if (descPrefix) {
     conditions.push({
@@ -110,7 +138,7 @@ export async function GET(req: Request) {
     },
   });
 
-  const result = frames.map((f) => ({
+  let result = frames.map((f) => ({
     id: f.id,
     manufacturer: f.manufacturer,
     style: f.style,
@@ -123,6 +151,12 @@ export async function GET(req: Request) {
     inStock: f._count.items,
     createdAt: f.createdAt.toISOString(),
   }));
+
+  if (sort === "inStock") {
+    result = [...result].sort((a, b) =>
+      dir === "asc" ? a.inStock - b.inStock : b.inStock - a.inStock
+    );
+  }
 
   return NextResponse.json(result);
 }
