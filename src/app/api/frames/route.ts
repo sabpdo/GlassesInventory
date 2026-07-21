@@ -4,6 +4,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { resolveColor, resolveManufacturer } from "@/lib/resolve-labels";
+import { findMatchingFrame } from "@/lib/match-frame";
+import { addFrameInventory, InventoryError } from "@/lib/frame-inventory";
 
 const frameSchema = z.object({
   manufacturer: z.string().min(1, "Manufacturer is required"),
@@ -26,10 +28,24 @@ const createFrameSchema = frameSchema.extend({
   barcode: z.string().trim().min(1).optional().nullable(),
   markSold: z.boolean().optional().default(false),
   soldPrice: z.coerce.number().nonnegative().optional().nullable(),
+  confirmDuplicate: z.boolean().optional().default(false),
+  addToExistingFrameId: z.string().optional(),
 });
 
+const SORT_FIELDS = [
+  "manufacturer",
+  "description",
+  "cost",
+  "createdAt",
+] as const;
+type SortField = (typeof SORT_FIELDS)[number];
+
+function isSortField(value: string): value is SortField {
+  return (SORT_FIELDS as readonly string[]).includes(value);
+}
+
 // GET /api/frames
-//   ?sort=manufacturer|description
+//   ?sort=manufacturer|description|cost|createdAt
 //   &dir=asc|desc
 //   &q=foo                          full-text-ish search across all fields
 //   &manufacturer=Ray-Ban,Oakley    one or more (comma separated)
@@ -37,8 +53,8 @@ const createFrameSchema = frameSchema.extend({
 //   &out=1                          include out-of-stock frames (default: hide)
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const sort = (searchParams.get("sort") ?? "manufacturer") as
-    "manufacturer" | "description";
+  const sortParam = searchParams.get("sort") ?? "manufacturer";
+  const sort: SortField = isSortField(sortParam) ? sortParam : "manufacturer";
   const dir = (searchParams.get("dir") ?? "asc") as "asc" | "desc";
   const q = searchParams.get("q")?.trim();
   const manufacturers =
@@ -53,7 +69,11 @@ export async function GET(req: Request) {
   const orderBy: Record<string, "asc" | "desc">[] =
     sort === "description"
       ? [{ description: dir }, { manufacturer: "asc" }]
-      : [{ manufacturer: dir }, { description: "asc" }];
+      : sort === "cost"
+        ? [{ cost: dir }, { manufacturer: "asc" }]
+        : sort === "createdAt"
+          ? [{ createdAt: dir }]
+          : [{ manufacturer: dir }, { description: "asc" }];
 
   const conditions: Prisma.FrameWhereInput[] = [];
   if (!includeOutOfStock) {
@@ -101,6 +121,7 @@ export async function GET(req: Request) {
     size: f.size,
     notes: f.notes,
     inStock: f._count.items,
+    createdAt: f.createdAt.toISOString(),
   }));
 
   return NextResponse.json(result);
@@ -119,7 +140,15 @@ export async function POST(req: Request) {
     );
   }
 
-  const { quantity, barcode, markSold, soldPrice, ...frameData } = parsed.data;
+  const {
+    quantity,
+    barcode,
+    markSold,
+    soldPrice,
+    confirmDuplicate,
+    addToExistingFrameId,
+    ...frameData
+  } = parsed.data;
 
   frameData.manufacturer = await resolveManufacturer(
     prisma,
@@ -127,77 +156,85 @@ export async function POST(req: Request) {
   );
   frameData.color = await resolveColor(prisma, frameData.color);
 
+  const inventoryInput = {
+    quantity,
+    barcode: barcode ?? null,
+    markSold,
+    soldPrice: soldPrice ?? null,
+  };
+
+  if (addToExistingFrameId) {
+    const existing = await prisma.frame.findUnique({
+      where: { id: addToExistingFrameId },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Frame not found." }, { status: 404 });
+    }
+    try {
+      const inStock = await addFrameInventory(
+        prisma,
+        existing.id,
+        auth.userId,
+        inventoryInput
+      );
+      return NextResponse.json({ ...existing, inStock }, { status: 200 });
+    } catch (e) {
+      if (e instanceof InventoryError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+  }
+
+  if (!confirmDuplicate) {
+    const match = await findMatchingFrame(prisma, {
+      manufacturer: frameData.manufacturer,
+      style: frameData.style,
+      color: frameData.color,
+      description: frameData.description ?? null,
+      size: frameData.size ?? null,
+    });
+    if (match) {
+      return NextResponse.json(
+        {
+          error: "A matching frame already exists in inventory.",
+          duplicate: true,
+          existingFrame: {
+            id: match.id,
+            manufacturer: match.manufacturer,
+            style: match.style,
+            color: match.color,
+            description: match.description,
+            size: match.size,
+            inStock: match._count.items,
+          },
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const frame = await prisma.frame.create({
     data: { ...frameData, createdById: auth.userId },
   });
 
-  let firstItemId: string | null = null;
-
-  if (barcode) {
-    try {
-      const item = await prisma.item.create({
-        data: {
-          barcode,
-          frameId: frame.id,
-          createdById: auth.userId,
-        },
-      });
-      firstItemId = item.id;
-    } catch (e) {
-      await prisma.frame
-        .delete({ where: { id: frame.id } })
-        .catch(() => undefined);
-      if (
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === "P2002"
-      ) {
-        return NextResponse.json(
-          { error: "That barcode is already attached to an item." },
-          { status: 409 }
-        );
-      }
-      throw e;
+  let inStock = 0;
+  try {
+    inStock = await addFrameInventory(
+      prisma,
+      frame.id,
+      auth.userId,
+      inventoryInput
+    );
+  } catch (e) {
+    await prisma.frame
+      .delete({ where: { id: frame.id } })
+      .catch(() => undefined);
+    if (e instanceof InventoryError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
     }
-  } else {
-    const count = quantity > 0 ? quantity : markSold ? 1 : 0;
-    if (count > 0) {
-      if (count === 1) {
-        const item = await prisma.item.create({
-          data: { frameId: frame.id, createdById: auth.userId },
-        });
-        firstItemId = item.id;
-      } else {
-        await prisma.item.createMany({
-          data: Array.from({ length: count }, () => ({
-            frameId: frame.id,
-            createdById: auth.userId,
-          })),
-        });
-        const first = await prisma.item.findFirst({
-          where: { frameId: frame.id },
-          orderBy: { createdAt: "asc" },
-          select: { id: true },
-        });
-        firstItemId = first?.id ?? null;
-      }
-    }
+    throw e;
   }
-
-  if (markSold && firstItemId) {
-    await prisma.item.update({
-      where: { id: firstItemId },
-      data: {
-        status: "SOLD",
-        soldAt: new Date(),
-        soldPrice: soldPrice ?? null,
-        soldById: auth.userId,
-      },
-    });
-  }
-
-  const inStock = await prisma.item.count({
-    where: { frameId: frame.id, status: "IN_STOCK" },
-  });
 
   return NextResponse.json({ ...frame, inStock }, { status: 201 });
 }

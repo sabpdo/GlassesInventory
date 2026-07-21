@@ -12,10 +12,11 @@ barcode scanning.
   Additional users are created on the **Team** page.
 - Email, username, or Google sign-in (Google only works for accounts the admin
   has already created)
-- Inventory grid sortable by **Vendor (Manufacturer)** or **Description**, with
-  case-insensitive search, low-stock highlighting, and **auto-refresh** every 5s
-- Add / edit / delete frames; **Add similar** copies a frame’s vendor, style,
-  color, cost, retail, and size into a new frame (handy for new colors)
+- Inventory grid sortable by **Vendor**, **Description**, **Cost**, or
+  **Recently added**, with case-insensitive search, low-stock highlighting, and
+  **auto-refresh** every 5s
+- Add / edit / delete frames; **Add similar** copies fields into a new frame;
+  creating a matching frame prompts to **add to existing inventory** instead
 - Attach physical items (each with a unique barcode) to a frame; edit, delete,
   mark unsold, or update sold price per item
 - **Scan barcode** (`/scan`) — pair phone (default) or use this device’s camera:

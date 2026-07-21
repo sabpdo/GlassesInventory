@@ -76,6 +76,15 @@ export function FrameForm({
   const [submitting, setSubmitting] = useState(false);
   const [lossWarningOpen, setLossWarningOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateFrame, setDuplicateFrame] = useState<{
+    id: string;
+    manufacturer: string;
+    style: string;
+    color: string;
+    description: string | null;
+    inStock: number;
+  } | null>(null);
   const [manufacturerSuggestions, setManufacturerSuggestions] = useState<
     string[]
   >([]);
@@ -120,7 +129,10 @@ export function FrameForm({
     if (next !== values.color) update("color", next);
   }
 
-  async function saveFrame() {
+  async function saveFrame(options?: {
+    confirmDuplicate?: boolean;
+    addToExistingFrameId?: string;
+  }) {
     setSubmitting(true);
 
     const payload: Record<string, unknown> = {
@@ -147,6 +159,10 @@ export function FrameForm({
       if (values.markSold && values.soldPrice.trim()) {
         payload.soldPrice = Number(values.soldPrice);
       }
+      if (options?.confirmDuplicate) payload.confirmDuplicate = true;
+      if (options?.addToExistingFrameId) {
+        payload.addToExistingFrameId = options.addToExistingFrameId;
+      }
     }
 
     const url = frameId ? `/api/frames/${frameId}` : "/api/frames";
@@ -159,18 +175,57 @@ export function FrameForm({
     setSubmitting(false);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      if (
+        isCreate &&
+        res.status === 409 &&
+        data.duplicate &&
+        data.existingFrame
+      ) {
+        setDuplicateFrame(data.existingFrame);
+        setDuplicateOpen(true);
+        return;
+      }
       const msg = data.error ?? "Could not save frame.";
       setError(msg);
       toast.error(msg);
       return;
     }
     const saved = await res.json();
-    toast.success(frameId ? "Frame updated" : "Frame created");
+    const restocked = Boolean(options?.addToExistingFrameId);
+    toast.success(
+      frameId
+        ? "Frame updated"
+        : restocked
+          ? "Added to existing frame"
+          : "Frame created"
+    );
     if (onSaved) onSaved(saved.id);
     else {
       router.push(`/frames/${saved.id}`);
       router.refresh();
     }
+  }
+
+  function plannedAddSummary(): string {
+    const barcode = (lockedBarcode ?? values.barcode).trim();
+    if (barcode) return "1 item with this barcode";
+    const qtyRaw = values.quantity.trim();
+    const quantity = qtyRaw === "" ? 0 : Number(qtyRaw);
+    const count = quantity > 0 ? quantity : values.markSold ? 1 : 1;
+    return `${count} item${count === 1 ? "" : "s"}`;
+  }
+
+  async function addToExistingInventory() {
+    if (!duplicateFrame) return;
+    setDuplicateOpen(false);
+    setError(null);
+    await saveFrame({ addToExistingFrameId: duplicateFrame.id });
+  }
+
+  async function createDuplicateAnyway() {
+    setDuplicateOpen(false);
+    setError(null);
+    await saveFrame({ confirmDuplicate: true });
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -435,6 +490,65 @@ export function FrameForm({
           </button>
         </div>
       </form>
+
+      <Modal
+        open={duplicateOpen}
+        onClose={() => !submitting && setDuplicateOpen(false)}
+        busy={submitting}
+        size="sm"
+        title="Frame already exists"
+        description="This matches a frame already in the system."
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setDuplicateOpen(false)}
+              disabled={submitting}
+              className="btn-secondary"
+            >
+              Go back
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => void createDuplicateAnyway()}
+              className="btn-secondary"
+            >
+              Create anyway
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => void addToExistingInventory()}
+              className="btn-primary"
+            >
+              {submitting ? "Adding…" : "Add to inventory"}
+            </button>
+          </>
+        }
+      >
+        {duplicateFrame ? (
+          <div className="space-y-2 text-sm text-slate-600">
+            <p>
+              <span className="font-semibold text-slate-900">
+                {duplicateFrame.manufacturer} · {duplicateFrame.style} ·{" "}
+                {duplicateFrame.color}
+              </span>
+              {duplicateFrame.description
+                ? ` · ${duplicateFrame.description}`
+                : null}
+            </p>
+            <p>
+              Currently{" "}
+              <span className="font-medium text-slate-900">
+                {duplicateFrame.inStock} in stock
+              </span>
+              . Add {plannedAddSummary()} to this frame instead of creating a
+              duplicate?
+            </p>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         open={lossWarningOpen}

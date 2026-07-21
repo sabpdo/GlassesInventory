@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MultiSelect } from "@/components/MultiSelect";
-import { formatCurrency, formatDescription } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDescription } from "@/lib/utils";
 
 const LOW_STOCK_THRESHOLD = 3;
 
@@ -18,9 +18,10 @@ type FrameRow = {
   retailCost: number;
   size: string | null;
   inStock: number;
+  createdAt: string;
 };
 
-type SortField = "manufacturer" | "description";
+type SortField = "manufacturer" | "description" | "cost" | "createdAt";
 type SortDir = "asc" | "desc";
 
 export function InventoryGrid() {
@@ -28,9 +29,18 @@ export function InventoryGrid() {
   const searchParams = useSearchParams();
 
   // Initial state seeded from the URL so refresh/bookmark/share works.
-  const [sort, setSort] = useState<SortField>(
-    (searchParams.get("sort") as SortField) || "manufacturer"
-  );
+  const [sort, setSort] = useState<SortField>(() => {
+    const param = searchParams.get("sort");
+    if (
+      param === "description" ||
+      param === "cost" ||
+      param === "createdAt" ||
+      param === "manufacturer"
+    ) {
+      return param;
+    }
+    return "manufacturer";
+  });
   const [dir, setDir] = useState<SortDir>(
     (searchParams.get("dir") as SortDir) || "asc"
   );
@@ -177,7 +187,7 @@ export function InventoryGrid() {
       setDir(dir === "asc" ? "desc" : "asc");
     } else {
       setSort(field);
-      setDir("asc");
+      setDir(field === "createdAt" ? "desc" : "asc");
     }
   }
 
@@ -278,6 +288,30 @@ export function InventoryGrid() {
             Description{" "}
             {sort === "description" ? (dir === "asc" ? "↑" : "↓") : ""}
           </button>
+          <button
+            type="button"
+            onClick={() => toggleSort("cost")}
+            className={
+              "rounded-md px-2 py-1 text-sm font-medium " +
+              (sort === "cost"
+                ? "bg-brand-50 text-brand-700"
+                : "text-slate-600 hover:bg-slate-100")
+            }
+          >
+            Cost {sort === "cost" ? (dir === "asc" ? "↑" : "↓") : ""}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleSort("createdAt")}
+            className={
+              "rounded-md px-2 py-1 text-sm font-medium " +
+              (sort === "createdAt"
+                ? "bg-brand-50 text-brand-700"
+                : "text-slate-600 hover:bg-slate-100")
+            }
+          >
+            Recent {sort === "createdAt" ? (dir === "asc" ? "↑" : "↓") : ""}
+          </button>
         </div>
         <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm text-slate-600">
           <input
@@ -326,10 +360,24 @@ export function InventoryGrid() {
                 >
                   Description
                 </Th>
-                <th className="px-4 py-3 text-right">Cost</th>
+                <Th
+                  active={sort === "cost"}
+                  dir={dir}
+                  onClick={() => toggleSort("cost")}
+                  className="text-right"
+                >
+                  Cost
+                </Th>
                 <th className="px-4 py-3 text-right">Retail</th>
                 <th className="px-4 py-3">Size</th>
                 <th className="px-4 py-3 text-right">In Stock</th>
+                <Th
+                  active={sort === "createdAt"}
+                  dir={dir}
+                  onClick={() => toggleSort("createdAt")}
+                >
+                  Added
+                </Th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -337,7 +385,7 @@ export function InventoryGrid() {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-slate-400"
                   >
                     Loading inventory…
@@ -346,7 +394,7 @@ export function InventoryGrid() {
               ) : rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-slate-400"
                   >
                     {filterActive ? (
@@ -463,6 +511,9 @@ export function InventoryGrid() {
                           {r.inStock}
                         </span>
                       </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                        {formatDate(r.createdAt)}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
                         <span
                           aria-hidden
@@ -488,19 +539,22 @@ function Th({
   dir,
   children,
   onClick,
+  className = "",
 }: {
   active: boolean;
   dir: SortDir;
   children: React.ReactNode;
   onClick: () => void;
+  className?: string;
 }) {
   return (
-    <th className="px-4 py-3">
+    <th className={"px-4 py-3 " + className}>
       <button
         type="button"
         onClick={onClick}
         className={
-          "inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide " +
+          "inline-flex w-full items-center gap-1 text-xs font-semibold uppercase tracking-wide " +
+          (className.includes("text-right") ? "justify-end " : "") +
           (active ? "text-brand-700" : "text-slate-500 hover:text-slate-700")
         }
       >
