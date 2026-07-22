@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isUserAdmin, syncEnvAdminsToDb } from "@/lib/admin";
+import { frameLabel } from "@/lib/inventory-events";
 import { getUserDisplayName, getUserLogin } from "@/lib/users";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
@@ -53,38 +54,46 @@ export default async function AdminUsersPage() {
     })
   );
 
-  const [recentAdded, recentSold, shopTotals] = await Promise.all([
-    prisma.item.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 15,
-      include: {
-        frame: { select: { manufacturer: true, style: true } },
-        createdBy: { select: { name: true, email: true, username: true } },
-      },
-    }),
-    prisma.item.findMany({
-      where: { soldAt: { not: null } },
-      orderBy: { soldAt: "desc" },
-      take: 15,
-      include: {
-        frame: { select: { manufacturer: true, style: true } },
-        soldBy: { select: { name: true, email: true, username: true } },
-      },
-    }),
-    Promise.all([
-      prisma.item.count({ where: { status: "SOLD" } }),
-      prisma.item.aggregate({
-        where: { status: "SOLD" },
-        _sum: { soldPrice: true },
+  const [recentAdded, recentSold, recentDeletions, shopTotals] =
+    await Promise.all([
+      prisma.item.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 15,
+        include: {
+          frame: { select: { manufacturer: true, style: true } },
+          createdBy: { select: { name: true, email: true, username: true } },
+        },
       }),
-    ]),
-  ]);
+      prisma.item.findMany({
+        where: { soldAt: { not: null } },
+        orderBy: { soldAt: "desc" },
+        take: 15,
+        include: {
+          frame: { select: { manufacturer: true, style: true } },
+          soldBy: { select: { name: true, email: true, username: true } },
+        },
+      }),
+      prisma.inventoryEvent.findMany({
+        orderBy: { occurredAt: "desc" },
+        take: 15,
+        include: {
+          actor: { select: { name: true, email: true, username: true } },
+        },
+      }),
+      Promise.all([
+        prisma.item.count({ where: { status: "SOLD" } }),
+        prisma.item.aggregate({
+          where: { status: "SOLD" },
+          _sum: { soldPrice: true },
+        }),
+      ]),
+    ]);
 
   const [soldCount, soldAgg] = shopTotals;
 
   type ActivityRow = {
     id: string;
-    kind: "added" | "sold";
+    kind: "added" | "sold" | "item_deleted" | "frame_deleted";
     when: Date;
     actor: {
       name: string | null;
@@ -94,7 +103,8 @@ export default async function AdminUsersPage() {
     frameLabel: string;
     barcode: string | null;
     soldPrice?: number | null;
-    frameId: string;
+    frameId: string | null;
+    stockRemoved?: number;
   };
 
   const activity: ActivityRow[] = [
@@ -117,6 +127,30 @@ export default async function AdminUsersPage() {
       soldPrice: i.soldPrice,
       frameId: i.frameId,
     })),
+    ...recentDeletions.map<ActivityRow>((e) => {
+      const label = frameLabel({
+        manufacturer: e.manufacturer ?? "Unknown",
+        style: e.style ?? "—",
+        color: e.color ?? "—",
+        description: e.description,
+      });
+      const stockRemoved =
+        e.kind === "FRAME_DELETED"
+          ? (e.inStockCount ?? 0)
+          : e.itemStatus === "IN_STOCK"
+            ? 1
+            : 0;
+      return {
+        id: "d-" + e.id,
+        kind: e.kind === "FRAME_DELETED" ? "frame_deleted" : "item_deleted",
+        when: e.occurredAt,
+        actor: e.actor ?? null,
+        frameLabel: label,
+        barcode: e.barcode,
+        frameId: e.kind === "FRAME_DELETED" ? null : e.frameId,
+        stockRemoved,
+      };
+    }),
   ]
     .sort((a, b) => b.when.getTime() - a.when.getTime())
     .slice(0, 15);
@@ -159,26 +193,73 @@ export default async function AdminUsersPage() {
                     className={
                       a.kind === "sold"
                         ? "font-medium text-emerald-700"
-                        : "font-medium text-brand-700"
+                        : a.kind === "added"
+                          ? "font-medium text-brand-700"
+                          : "font-medium text-red-700"
                     }
                   >
                     {a.actor
                       ? getUserDisplayName(a.actor)
                       : "Demo / unassigned"}
                   </span>{" "}
-                  {a.kind === "sold" ? "sold" : "added"}{" "}
-                  <Link
-                    href={`/frames/${a.frameId}`}
-                    className="text-slate-900 hover:text-brand-700"
-                  >
-                    {a.frameLabel}
-                  </Link>
-                  {a.kind === "sold" && a.soldPrice != null ? (
-                    <span className="text-slate-500">
-                      {" "}
-                      · {formatCurrency(a.soldPrice)}
-                    </span>
-                  ) : null}
+                  {a.kind === "sold" ? (
+                    <>
+                      sold{" "}
+                      <Link
+                        href={`/frames/${a.frameId}`}
+                        className="text-slate-900 hover:text-brand-700"
+                      >
+                        {a.frameLabel}
+                      </Link>
+                      {a.soldPrice != null ? (
+                        <span className="text-slate-500">
+                          {" "}
+                          · {formatCurrency(a.soldPrice)}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : a.kind === "added" ? (
+                    <>
+                      added{" "}
+                      <Link
+                        href={`/frames/${a.frameId}`}
+                        className="text-slate-900 hover:text-brand-700"
+                      >
+                        {a.frameLabel}
+                      </Link>
+                    </>
+                  ) : a.kind === "frame_deleted" ? (
+                    <>
+                      deleted frame style{" "}
+                      <span className="text-slate-900">{a.frameLabel}</span>
+                      {a.stockRemoved ? (
+                        <span className="text-slate-500">
+                          {" "}
+                          · {a.stockRemoved} in stock removed
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      deleted item{" "}
+                      {a.frameId ? (
+                        <Link
+                          href={`/frames/${a.frameId}`}
+                          className="text-slate-900 hover:text-brand-700"
+                        >
+                          {a.frameLabel}
+                        </Link>
+                      ) : (
+                        <span className="text-slate-900">{a.frameLabel}</span>
+                      )}
+                      {a.barcode ? (
+                        <span className="text-slate-500">
+                          {" "}
+                          · barcode {a.barcode}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
                 </div>
                 <span className="shrink-0 text-xs text-slate-400">
                   {formatDate(a.when)}

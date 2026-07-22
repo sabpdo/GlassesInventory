@@ -69,7 +69,7 @@ function buildOrderBy(
 //   &q=foo                          full-text-ish search across all fields
 //   &manufacturer=Ray-Ban,Oakley    one or more (comma separated)
 //   &desc=RB3025                    descriptions starting with this prefix
-//   &out=1                          include out-of-stock frames (default: hide)
+//   &hideOut=1                      hide frames with zero in stock (default: show all)
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const sortParam = searchParams.get("sort") ?? "manufacturer";
@@ -92,13 +92,12 @@ export async function GET(req: Request) {
       .map((s) => s.trim())
       .filter(Boolean) ?? [];
   const descPrefix = searchParams.get("desc")?.trim();
-  const includeOutOfStock = searchParams.get("out") === "1";
+  const hideOutOfStock = searchParams.get("hideOut") === "1";
 
   const orderBy = buildOrderBy(sort, dir);
 
   const conditions: Prisma.FrameWhereInput[] = [];
-  if (!includeOutOfStock) {
-    // "In stock" = at least one Item with status IN_STOCK.
+  if (hideOutOfStock) {
     conditions.push({ items: { some: { status: "IN_STOCK" } } });
   }
   if (manufacturers.length > 0) {

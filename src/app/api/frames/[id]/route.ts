@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { resolveColor, resolveManufacturer } from "@/lib/resolve-labels";
+import { logFrameDeleted } from "@/lib/inventory-events";
 
 const updateSchema = z.object({
   manufacturer: z.string().min(1),
@@ -84,6 +85,19 @@ export async function DELETE(req: Request, { params }: RouteParams) {
     );
   }
 
+  const frame = await prisma.frame.findUnique({ where: { id: params.id } });
+  if (!frame) {
+    return NextResponse.json({ error: "Frame not found" }, { status: 404 });
+  }
+
+  const inStock = await prisma.item.count({
+    where: { frameId: params.id, status: "IN_STOCK" },
+  });
+
+  await logFrameDeleted(prisma, auth.userId, frame, {
+    inStock,
+    sold: soldCount,
+  });
   await prisma.frame.delete({ where: { id: params.id } });
   return NextResponse.json({ ok: true });
 }

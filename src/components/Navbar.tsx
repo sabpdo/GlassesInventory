@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 const baseLinks = [
   { href: "/", label: "Inventory" },
+  { href: "/stats", label: "Run Stats" },
   { href: "/scan", label: "Scan Barcode" },
   { href: "/frames/new", label: "New Frame" },
 ];

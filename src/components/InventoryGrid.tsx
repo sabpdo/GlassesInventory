@@ -53,8 +53,8 @@ export function InventoryGrid() {
     searchParams.get("color")?.split(",").filter(Boolean) ?? []
   );
   const [descPrefix, setDescPrefix] = useState(searchParams.get("desc") || "");
-  const [showOutOfStock, setShowOutOfStock] = useState(
-    searchParams.get("out") === "1"
+  const [hideOutOfStock, setHideOutOfStock] = useState(
+    searchParams.get("hideOut") === "1"
   );
 
   const [rows, setRows] = useState<FrameRow[]>([]);
@@ -79,7 +79,7 @@ export function InventoryGrid() {
     if (descPrefix.trim()) params.set("desc", descPrefix.trim());
     if (sort !== "manufacturer") params.set("sort", sort);
     if (dir !== defaultSortDir(sort)) params.set("dir", dir);
-    if (showOutOfStock) params.set("out", "1");
+    if (hideOutOfStock) params.set("hideOut", "1");
     return params.toString();
   }, [
     q,
@@ -88,7 +88,7 @@ export function InventoryGrid() {
     descPrefix,
     sort,
     dir,
-    showOutOfStock,
+    hideOutOfStock,
   ]);
 
   useEffect(() => {
@@ -293,11 +293,11 @@ export function InventoryGrid() {
         <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm text-slate-600">
           <input
             type="checkbox"
-            checked={showOutOfStock}
-            onChange={(e) => setShowOutOfStock(e.target.checked)}
+            checked={hideOutOfStock}
+            onChange={(e) => setHideOutOfStock(e.target.checked)}
             className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
           />
-          Show out of stock
+          Hide out-of-stock styles
         </label>
         {filterActive ? (
           <button
@@ -408,7 +408,7 @@ export function InventoryGrid() {
                   >
                     {filterActive ? (
                       <>
-                        No in-stock frames match these filters.{" "}
+                        No frames match these filters.{" "}
                         <button
                           type="button"
                           onClick={clearFilters}
@@ -416,30 +416,30 @@ export function InventoryGrid() {
                         >
                           Clear filters
                         </button>
-                        {!showOutOfStock ? (
+                        {!hideOutOfStock ? (
                           <>
                             {" "}
                             or{" "}
                             <button
                               type="button"
-                              onClick={() => setShowOutOfStock(true)}
+                              onClick={() => setHideOutOfStock(true)}
                               className="font-medium text-brand-700 hover:text-brand-600"
                             >
-                              show out of stock
+                              hide out-of-stock styles
                             </button>
                           </>
                         ) : null}
                         .
                       </>
-                    ) : !showOutOfStock ? (
+                    ) : hideOutOfStock ? (
                       <>
-                        No frames in stock.{" "}
+                        No in-stock frames.{" "}
                         <button
                           type="button"
-                          onClick={() => setShowOutOfStock(true)}
+                          onClick={() => setHideOutOfStock(false)}
                           className="font-medium text-brand-700 hover:text-brand-600"
                         >
-                          Show out of stock
+                          Show all styles
                         </button>{" "}
                         or{" "}
                         <Link

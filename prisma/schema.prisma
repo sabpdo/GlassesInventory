@@ -26,6 +26,7 @@ model User {
   framesCreated Frame[] @relation("FrameCreator")
   itemsCreated  Item[]  @relation("ItemCreator")
   itemsSold     Item[]  @relation("ItemSeller")
+  inventoryEvents InventoryEvent[] @relation("InventoryEventActor")
 }
 
 // A Frame is a unique glasses style (Manufacturer + Style + Color combo).
@@ -96,4 +97,28 @@ model PairingSession {
   expiresAt     DateTime
 
   @@index([expiresAt])
+}
+
+// Append-only log for manual deletes and other inventory actions.
+// Keeps history even after rows are removed from Frame / Item.
+model InventoryEvent {
+  id           String   @id @default(cuid())
+  kind         String   // ITEM_DELETED | FRAME_DELETED
+  occurredAt   DateTime @default(now())
+  actorId      String?
+  actor        User?    @relation("InventoryEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  frameId      String?
+  itemId       String?
+  manufacturer String?
+  style        String?
+  color        String?
+  description  String?
+  barcode      String?
+  itemStatus   String?
+  inStockCount Int?
+  soldCount    Int?
+
+  @@index([occurredAt])
+  @@index([kind])
 }

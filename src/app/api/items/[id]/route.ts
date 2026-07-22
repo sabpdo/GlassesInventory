@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { logItemDeleted } from "@/lib/inventory-events";
 
 const patchSchema = z.object({
   status: z.enum(["IN_STOCK"]).optional(),
@@ -70,7 +71,25 @@ export async function DELETE(_req: Request, { params }: RouteParams) {
   const auth = await requireUser();
   if (!auth.ok) return auth.response;
 
+  const item = await prisma.item.findUnique({
+    where: { id: params.id },
+    include: {
+      frame: {
+        select: {
+          manufacturer: true,
+          style: true,
+          color: true,
+          description: true,
+        },
+      },
+    },
+  });
+  if (!item) {
+    return NextResponse.json({ error: "Item not found" }, { status: 404 });
+  }
+
   try {
+    await logItemDeleted(prisma, auth.userId, item);
     await prisma.item.delete({ where: { id: params.id } });
     return NextResponse.json({ ok: true });
   } catch (e) {
